@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+uploads
+*.log
+.git
+.gitignore
+README.md
+test-api.sh
