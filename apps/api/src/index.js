@@ -105,6 +105,18 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
   }
 });
 
+// Serve the web client after API routes
+const webDistPath = path.resolve(__dirname, '../../web/dist');
+app.use(express.static(webDistPath));
+
+// SPA fallback (ignore API routes)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(webDistPath, 'index.html'));
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
