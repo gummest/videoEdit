@@ -41,6 +41,8 @@
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .upload-zone:hover {
@@ -206,7 +208,7 @@
 
 .error-box {
   background-color: #fef2f2;
-  border: 1px solid: #fecaca;
+  border: 1px solid #fecaca;
   border-radius: 0.5rem;
   padding: 1rem;
   margin-bottom: 1.5rem;
@@ -304,5 +306,12 @@
 }
 
 .hidden {
-  display: none;
+  display: none !important;
+  visibility: hidden;
+  position: absolute;
+  left: -9999px;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }

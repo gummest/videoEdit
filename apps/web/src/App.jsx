@@ -28,7 +28,10 @@ function App() {
     if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
     } else if (e.type === "dragleave") {
-      setDragActive(false);
+      // Only set to false if dragging out of the zone completely
+      if (e.currentTarget === e.target) {
+        setDragActive(false);
+      }
     }
   };
 
@@ -43,17 +46,24 @@ function App() {
   };
 
   const handleFileSelect = (file) => {
-    if (!file) return;
+    if (!file) {
+      console.warn('No file provided to handleFileSelect');
+      return;
+    }
+    
+    console.log('File selected:', { name: file.name, size: file.size, type: file.type });
     
     // Validate file type
     if (!file.type.startsWith('video/')) {
       setError('Please select a valid video file');
+      console.warn('Invalid file type:', file.type);
       return;
     }
 
     // Validate file size (500MB max)
     if (file.size > 500 * 1024 * 1024) {
       setError('File size must be less than 500MB');
+      console.warn('File too large:', file.size);
       return;
     }
 
@@ -70,7 +80,13 @@ function App() {
     video.preload = 'metadata';
     video.onloadedmetadata = () => {
       window.URL.revokeObjectURL(video.src);
-      setVideoDuration(Math.floor(video.duration));
+      const duration = Math.floor(video.duration);
+      setVideoDuration(duration);
+      console.log('Video duration:', duration);
+    };
+    video.onerror = () => {
+      console.error('Failed to load video metadata');
+      window.URL.revokeObjectURL(video.src);
     };
     video.src = url;
   };
@@ -78,6 +94,10 @@ function App() {
   const handleFileInputChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       handleFileSelect(e.target.files[0]);
+    }
+    // Reset the input value to allow selecting the same file again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -182,7 +202,21 @@ function App() {
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (fileInputRef.current) {
+                fileInputRef.current.click();
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (fileInputRef.current) {
+                  fileInputRef.current.click();
+                }
+              }
+            }}
           >
             <input
               ref={fileInputRef}
@@ -190,6 +224,7 @@ function App() {
               accept="video/*"
               onChange={handleFileInputChange}
               className="hidden"
+              aria-label="Upload video file"
             />
             
             {videoFile ? (
