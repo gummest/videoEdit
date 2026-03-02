@@ -15,13 +15,13 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2gb' }));
 
 // Configure multer for file uploads
 const upload = multer({
   dest: 'uploads/',
   limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB
+    fileSize: 2 * 1024 * 1024 * 1024, // 2GB
   },
   fileFilter: (req, file, cb) => {
     // Accept all video MIME types + common video file extensions
@@ -122,7 +122,7 @@ app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({ 
-        error: 'File too large. Maximum size is 500MB.' 
+        error: 'File too large. Maximum size is 2GB.' 
       });
     }
     return res.status(400).json({ error: error.message });
