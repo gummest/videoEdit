@@ -8,4 +8,4 @@ cmds = ["npm install --prefix apps/api", "npm install --prefix apps/web"]
 cmds = ["npm run build --prefix apps/web"]
 
 [start]
-cmd = "npm --prefix apps/web start"
+cmd = "npm --prefix apps/api start"
