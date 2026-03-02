@@ -173,10 +173,7 @@ const webDistPath = path.resolve(__dirname, '../../web/dist');
 app.use(express.static(webDistPath));
 
 // SPA fallback (ignore API routes)
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) {
-    return next();
-  }
+app.get(/^\/((?!api(?:\/|$)).*)/, (req, res) => {
   res.sendFile(path.join(webDistPath, 'index.html'));
 });
 
