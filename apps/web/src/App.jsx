@@ -8,6 +8,9 @@ const PRESETS = {
   custom: { label: 'Custom', totalLength: 30, cutDuration: 3 }
 };
 
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const MAX_FILE_SIZE_LABEL = '2GB';
+
 function App() {
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreview, setVideoPreview] = useState(null);
@@ -57,6 +60,12 @@ function App() {
     if (!file.type.startsWith('video/')) {
       setError('Please select a valid video file');
       console.warn('Invalid file type:', file.type);
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setError(`File size must be less than ${MAX_FILE_SIZE_LABEL}`);
+      console.warn('File too large:', file.size);
       return;
     }
 

@@ -4,7 +4,7 @@ React SPA for uploading, configuring, and processing videos.
 
 ## Features
 
-- **File Upload**: Drag-and-drop or click to upload video files (max 500MB)
+- **File Upload**: Drag-and-drop or click to upload video files (max 2GB)
 - **Video Preview**: Shows file name, size, and duration
 - **Preset Configurations**:
   - Quick 30s (3s cuts)
@@ -69,7 +69,7 @@ apps/web/
 ### Upload Zone
 - Drag & drop support
 - File type validation (video/* only)
-- Size validation (500MB max)
+- Size validation (2GB max)
 - Duration extraction from video metadata
 
 ### Configuration Form

@@ -63,20 +63,17 @@ describe('File Upload Functionality', () => {
     });
   });
 
-  it('should reject files larger than 500MB', async () => {
+  it('should reject files larger than 2GB', async () => {
     render(<App />);
     
     const fileInput = screen.getByLabelText(/Upload video file/i);
-    const largeFile = new File(
-      [new Uint8Array(501 * 1024 * 1024)],
-      'large.mp4',
-      { type: 'video/mp4' }
-    );
+    const largeFile = new File(['video content'], 'large.mp4', { type: 'video/mp4' });
+    Object.defineProperty(largeFile, 'size', { value: 2 * 1024 * 1024 * 1024 + 1 });
     
     fireEvent.change(fileInput, { target: { files: [largeFile] } });
     
     await waitFor(() => {
-      expect(screen.getByText(/File size must be less than 500MB/i)).toBeInTheDocument();
+      expect(screen.getByText(/File size must be less than 2GB/i)).toBeInTheDocument();
     });
   });
 
