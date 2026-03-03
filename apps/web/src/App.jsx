@@ -249,7 +249,38 @@ function App() {
       setResultVideo(videoUrl);
     } catch (err) {
       console.error('Processing error:', err);
-      setError(err.response?.data?.error || err.response?.data?.message || 'Failed to process video. Please try again.');
+
+      // Handle axios blob error response
+      let errorMessage = 'Failed to process video. Please try again.';
+
+      if (err.response?.data) {
+        // Error response is a blob, try to read it as text
+        const errorBlob = err.response.data;
+        const reader = new FileReader();
+
+        try {
+          const errorText = await new Promise((resolve, reject) => {
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(errorBlob);
+          });
+
+          // Try to parse as JSON, fallback to plain text
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.message || errorJson.error || errorText;
+          } catch {
+            errorMessage = errorText || errorMessage;
+          }
+        } catch (readErr) {
+          console.error('Failed to read error response:', readErr);
+          errorMessage = err.response?.statusText || errorMessage;
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

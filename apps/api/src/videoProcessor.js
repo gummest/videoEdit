@@ -4,14 +4,15 @@ import fs from 'fs/promises';
 import { promisify } from 'util';
 
 /**
- * Get video duration using ffprobe
+ * Get video duration and audio stream info using ffprobe
  */
-async function getVideoDuration(filePath) {
+async function getVideoInfo(filePath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, metadata) => {
       if (err) return reject(err);
       const duration = metadata.format.duration;
-      resolve(duration);
+      const hasAudio = metadata.streams.some(stream => stream.codec_type === 'audio');
+      resolve({ duration, hasAudio });
     });
   });
 }
@@ -39,8 +40,11 @@ async function extractSegment(inputPath, outputPath, startTime, duration) {
 
 /**
  * Concatenate multiple video segments
+ * @param {string[]} segmentPaths - Paths to segment files
+ * @param {string} outputPath - Output file path
+ * @param {boolean} hasAudio - Whether segments have audio streams
  */
-async function concatenateSegments(segmentPaths, outputPath) {
+async function concatenateSegments(segmentPaths, outputPath, hasAudio = true) {
   return new Promise((resolve, reject) => {
     const command = ffmpeg();
 
@@ -49,14 +53,24 @@ async function concatenateSegments(segmentPaths, outputPath) {
       command.input(segmentPath);
     });
 
-    // Use concat filter
-    const filterComplex = segmentPaths
-      .map((_, index) => `[${index}:v:0][${index}:a:0]`)
-      .join('') + `concat=n=${segmentPaths.length}:v=1:a=1[outv][outa]`;
+    // Use concat filter - adapt based on whether audio exists
+    let filterComplex, outputOptions;
+    if (hasAudio) {
+      filterComplex = segmentPaths
+        .map((_, index) => `[${index}:v:0][${index}:a:0]`)
+        .join('') + `concat=n=${segmentPaths.length}:v=1:a=1[outv][outa]`;
+      outputOptions = ['-map', '[outv]', '-map', '[outa]'];
+    } else {
+      // Video-only concat (no audio streams)
+      filterComplex = segmentPaths
+        .map((_, index) => `[${index}:v:0]`)
+        .join('') + `concat=n=${segmentPaths.length}:v=1[outv]`;
+      outputOptions = ['-map', '[outv]'];
+    }
 
     command
       .complexFilter(filterComplex)
-      .outputOptions(['-map', '[outv]', '-map', '[outa]'])
+      .outputOptions(outputOptions)
       .output(outputPath)
       .on('end', () => resolve(outputPath))
       .on('error', reject)
@@ -73,32 +87,37 @@ async function concatenateSegments(segmentPaths, outputPath) {
  * Main video processing function
  * 
  * Algorithm:
- * 1. Get video duration
- * 2. Calculate number of cuts needed
- * 3. Extract segments from beginning, middle, and end
- * 4. Concatenate all segments
- * 5. Return the output file path
+ * 1. Get video duration and check for audio stream
+ * 2. Clamp totalLength to video duration
+ * 3. Calculate number of cuts needed
+ * 4. Extract segments from beginning, middle, and end
+ * 5. Concatenate all segments (adapt for video-only if no audio)
+ * 6. Return the output file path
  */
 export async function processVideo(inputPath, totalLength, cutDuration) {
-  const videoDuration = await getVideoDuration(inputPath);
+  const { duration: videoDuration, hasAudio } = await getVideoInfo(inputPath);
 
   if (!Number.isFinite(videoDuration) || videoDuration <= 0) {
     throw new Error('Unable to determine video duration');
   }
 
-  console.log(`Input video duration: ${videoDuration.toFixed(2)}s`);
+  console.log(`Input video duration: ${videoDuration.toFixed(2)}s, has audio: ${hasAudio}`);
 
-  if (totalLength > videoDuration) {
-    throw new Error('Requested total length exceeds the video duration');
+  // Clamp effectiveTotalLength to video duration
+  const effectiveTotalLength = Math.min(totalLength, Math.floor(videoDuration));
+
+  if (effectiveTotalLength <= 0) {
+    throw new Error('Video duration is too short or invalid total length requested');
   }
 
   // Calculate number of cuts
-  const totalCuts = Math.floor(totalLength / cutDuration);
+  const totalCuts = Math.floor(effectiveTotalLength / cutDuration);
   
   if (totalCuts === 0) {
-    throw new Error('Total length too short for the given cut duration');
+    throw new Error('Total length too short for the given cut duration, or video is shorter than requested');
   }
 
+  console.log(`Requested total length: ${totalLength}s, clamped to: ${effectiveTotalLength}s`);
   console.log(`Extracting ${totalCuts} cuts of ${cutDuration}s each`);
 
   // Distribute cuts evenly across beginning, middle, and end
@@ -154,10 +173,10 @@ export async function processVideo(inputPath, totalLength, cutDuration) {
       throw new Error('No segments could be extracted from the video');
     }
 
-    // Concatenate all segments
+    // Concatenate all segments (pass hasAudio flag for proper filter)
     const outputPath = path.join(outputDir, `processed_${timestamp}.mp4`);
-    console.log(`Concatenating ${segmentPaths.length} segments...`);
-    await concatenateSegments(segmentPaths, outputPath);
+    console.log(`Concatenating ${segmentPaths.length} segments (hasAudio: ${hasAudio})...`);
+    await concatenateSegments(segmentPaths, outputPath, hasAudio);
 
     // Cleanup segment files
     console.log('Cleaning up temporary segments...');
