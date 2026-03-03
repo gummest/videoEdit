@@ -22,6 +22,7 @@ function App() {
   const [resultVideo, setResultVideo] = useState(null);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   const fileInputRef = useRef(null);
 
@@ -59,12 +60,28 @@ function App() {
     // Validate file type
     if (!file.type.startsWith('video/')) {
       setError('Please select a valid video file');
+      setVideoFile(null);
+      setVideoPreview(null);
+      setVideoDuration(null);
+      setResultVideo(null);
+      setUploadProgress(0);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       console.warn('Invalid file type:', file.type);
       return;
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setError(`File size must be less than ${MAX_FILE_SIZE_LABEL}`);
+      setVideoFile(null);
+      setVideoPreview(null);
+      setVideoDuration(null);
+      setResultVideo(null);
+      setUploadProgress(0);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       console.warn('File too large:', file.size);
       return;
     }
@@ -72,6 +89,7 @@ function App() {
     setError(null);
     setVideoFile(file);
     setResultVideo(null);
+    setUploadProgress(0);
     
     // Create preview URL
     const url = URL.createObjectURL(file);
@@ -140,6 +158,7 @@ function App() {
     setLoading(true);
     setError(null);
     setResultVideo(null);
+    setUploadProgress(0);
 
     try {
       const formData = new FormData();
@@ -153,7 +172,9 @@ function App() {
         },
         responseType: 'blob',
         onUploadProgress: (progressEvent) => {
+          if (!progressEvent.total) return;
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percentCompleted);
           console.log('Upload progress:', percentCompleted);
         }
       });
@@ -186,6 +207,8 @@ function App() {
     setVideoPreview(null);
     setVideoDuration(null);
     setResultVideo(null);
+    setError(null);
+    setUploadProgress(0);
   };
 
   return (
@@ -259,9 +282,16 @@ function App() {
                 </svg>
                 <p className="upload-text">Drag and drop your video here</p>
                 <p className="upload-subtext">or click to browse</p>
+                <p className="upload-limit">Max file size {MAX_FILE_SIZE_LABEL}</p>
               </div>
             )}
           </div>
+
+          {error && !videoFile && (
+            <div className="error-box" role="alert">
+              <p>{error}</p>
+            </div>
+          )}
 
           {/* Configuration Form */}
           {videoFile && (
@@ -321,7 +351,7 @@ function App() {
 
               {/* Error Display */}
               {error && (
-                <div className="error-box">
+                <div className="error-box" role="alert">
                   <p>{error}</p>
                 </div>
               )}
@@ -331,12 +361,22 @@ function App() {
                 {loading ? (
                   <>
                     <div className="spinner"></div>
-                    Processing...
+                    {uploadProgress > 0 && uploadProgress < 100
+                      ? `Uploading... ${uploadProgress}%`
+                      : 'Processing...'}
                   </>
                 ) : (
                   'Process Video'
                 )}
               </button>
+              {loading && (
+                <div className="progress-container" aria-live="polite">
+                  <div className="progress-track">
+                    <div className="progress-bar" style={{ width: `${uploadProgress}%` }}></div>
+                  </div>
+                  <p className="progress-text">Upload progress: {uploadProgress}%</p>
+                </div>
+              )}
             </div>
           )}
         </div>
