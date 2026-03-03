@@ -1,0 +1,12 @@
+{
+  "name": "videoedit",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npm install --prefix apps/api && npm install --prefix apps/web && npm run build --prefix apps/web",
+    "start": "npm --prefix apps/api start"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
