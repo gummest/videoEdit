@@ -81,7 +81,16 @@ async function concatenateSegments(segmentPaths, outputPath) {
  */
 export async function processVideo(inputPath, totalLength, cutDuration) {
   const videoDuration = await getVideoDuration(inputPath);
+
+  if (!Number.isFinite(videoDuration) || videoDuration <= 0) {
+    throw new Error('Unable to determine video duration');
+  }
+
   console.log(`Input video duration: ${videoDuration.toFixed(2)}s`);
+
+  if (totalLength > videoDuration) {
+    throw new Error('Requested total length exceeds the video duration');
+  }
 
   // Calculate number of cuts
   const totalCuts = Math.floor(totalLength / cutDuration);

@@ -8,8 +8,59 @@ const PRESETS = {
   custom: { label: 'Custom', totalLength: 30, cutDuration: 3 }
 };
 
-const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
-const MAX_FILE_SIZE_LABEL = '2GB';
+const VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.mpeg', '.mpg'];
+
+const parseFileSize = (value) => {
+  if (!value) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
+
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (/^\d+$/.test(normalized)) {
+    return Number.parseInt(normalized, 10);
+  }
+
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)$/i);
+  if (!match) return null;
+
+  const amount = Number.parseFloat(match[1]);
+  const unit = match[2].toLowerCase();
+  const multipliers = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+  };
+
+  return Math.floor(amount * multipliers[unit]);
+};
+
+const formatBytesLabel = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0B';
+  const gb = 1024 ** 3;
+  const mb = 1024 ** 2;
+  const kb = 1024;
+
+  if (bytes >= gb) {
+    const value = Math.round((bytes / gb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}GB`;
+  }
+  if (bytes >= mb) {
+    const value = Math.round((bytes / mb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}MB`;
+  }
+  if (bytes >= kb) {
+    const value = Math.round((bytes / kb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}KB`;
+  }
+  return `${bytes}B`;
+};
+
+const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const MAX_FILE_SIZE_BYTES =
+  parseFileSize(import.meta.env.VITE_MAX_FILE_SIZE) || DEFAULT_MAX_FILE_SIZE_BYTES;
+const MAX_FILE_SIZE_LABEL = formatBytesLabel(MAX_FILE_SIZE_BYTES);
 
 function App() {
   const [videoFile, setVideoFile] = useState(null);
@@ -58,7 +109,11 @@ function App() {
     console.log('File selected:', { name: file.name, size: file.size, type: file.type });
     
     // Validate file type
-    if (!file.type.startsWith('video/')) {
+    const fileExt = file.name?.includes('.') ? `.${file.name.split('.').pop().toLowerCase()}` : '';
+    const isVideoType = file.type?.startsWith('video/');
+    const isVideoExtension = VIDEO_EXTENSIONS.includes(fileExt);
+
+    if (!isVideoType && !isVideoExtension) {
       setError('Please select a valid video file');
       setVideoFile(null);
       setVideoPreview(null);
@@ -68,7 +123,7 @@ function App() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      console.warn('Invalid file type:', file.type);
+      console.warn('Invalid file type:', file.type, fileExt);
       return;
     }
 
@@ -155,6 +210,16 @@ function App() {
       return;
     }
 
+    if (cutDuration > totalLength) {
+      setError('Cut duration cannot be greater than total length');
+      return;
+    }
+
+    if (videoDuration && totalLength > videoDuration) {
+      setError('Total length cannot exceed the video duration');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResultVideo(null);
@@ -184,7 +249,7 @@ function App() {
       setResultVideo(videoUrl);
     } catch (err) {
       console.error('Processing error:', err);
-      setError(err.response?.data?.message || 'Failed to process video. Please try again.');
+      setError(err.response?.data?.error || err.response?.data?.message || 'Failed to process video. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -4,7 +4,7 @@ Backend service for processing videos with smart segment extraction and merging.
 
 ## Features
 
-- **Video Upload**: Accepts video files up to 500MB
+- **Video Upload**: Accepts video files up to 2GB by default (configurable)
 - **Smart Segmentation**: Extracts segments from beginning, middle, and end of video
 - **FFmpeg Processing**: Uses fluent-ffmpeg for efficient video manipulation
 - **Auto Cleanup**: Removes temporary files after processing
@@ -36,7 +36,7 @@ curl -X POST http://localhost:3000/api/process \
   --output processed.mp4
 ```
 
-### `GET /health`
+### `GET /health` or `GET /api/health`
 
 Health check endpoint.
 
@@ -69,6 +69,7 @@ npm start
 ## Environment Variables
 
 - `PORT`: Server port (default: 3000)
+- `MAX_FILE_SIZE`: Max upload size (e.g. `500mb`, `2gb`, or bytes). Defaults to 2GB.
 
 ## Algorithm
 
@@ -89,6 +90,6 @@ npm start
 ## Error Handling
 
 - Invalid file type → 400 Bad Request
-- File too large (>500MB) → 413 Payload Too Large
+- File too large (exceeds configured limit) → 413 Payload Too Large
 - Invalid parameters → 400 Bad Request
 - Processing error → 500 Internal Server Error

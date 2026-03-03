@@ -13,22 +13,81 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+
+const parseFileSize = (value) => {
+  if (!value) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
+
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (/^\d+$/.test(normalized)) {
+    return Number.parseInt(normalized, 10);
+  }
+
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)$/i);
+  if (!match) return null;
+
+  const amount = Number.parseFloat(match[1]);
+  const unit = match[2].toLowerCase();
+  const multipliers = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+  };
+
+  return Math.floor(amount * multipliers[unit]);
+};
+
+const formatBytesLabel = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0B';
+  const gb = 1024 ** 3;
+  const mb = 1024 ** 2;
+  const kb = 1024;
+
+  if (bytes >= gb) {
+    const value = Math.round((bytes / gb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}GB`;
+  }
+  if (bytes >= mb) {
+    const value = Math.round((bytes / mb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}MB`;
+  }
+  if (bytes >= kb) {
+    const value = Math.round((bytes / kb) * 10) / 10;
+    return `${value % 1 === 0 ? Math.trunc(value) : value}KB`;
+  }
+  return `${bytes}B`;
+};
+
+const maxUploadBytes =
+  parseFileSize(process.env.MAX_FILE_SIZE) ||
+  parseFileSize(process.env.MAX_UPLOAD_SIZE) ||
+  DEFAULT_MAX_UPLOAD_BYTES;
+const maxUploadLabel = formatBytesLabel(maxUploadBytes);
+
 // Middleware
+app.disable('x-powered-by');
 app.use(cors());
-app.use(express.json({ limit: '2gb' }));
+app.use(express.json({ limit: maxUploadBytes }));
+app.use(express.urlencoded({ extended: true, limit: maxUploadBytes }));
 
 // Configure multer for file uploads
 const upload = multer({
   dest: 'uploads/',
   limits: {
-    fileSize: 2 * 1024 * 1024 * 1024, // 2GB
+    fileSize: maxUploadBytes,
+    files: 1,
+    fields: 10,
   },
   fileFilter: (req, file, cb) => {
     // Accept all video MIME types + common video file extensions
     const videoExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.mpeg', '.mpg'];
     const fileExt = path.extname(file.originalname).toLowerCase();
-    
-    if (file.mimetype.startsWith('video/') || videoExtensions.includes(fileExt)) {
+
+    if (file.mimetype?.startsWith('video/') || videoExtensions.includes(fileExt)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type. Only video files are allowed.'));
@@ -37,7 +96,7 @@ const upload = multer({
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({ status: 'ok', service: 'video-processing-api' });
 });
 
@@ -52,23 +111,27 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
       return res.status(400).json({ error: 'No video file uploaded' });
     }
 
+    if (!req.file.size) {
+      return res.status(400).json({ error: 'Uploaded video file is empty' });
+    }
+
     inputPath = req.file.path;
 
     // Validate parameters
-    const totalLength = parseFloat(req.body.totalLength);
-    const cutDuration = parseFloat(req.body.cutDuration);
+    const totalLength = Number(req.body.totalLength);
+    const cutDuration = Number(req.body.cutDuration);
 
-    if (!totalLength || totalLength <= 0) {
+    if (!Number.isFinite(totalLength) || totalLength <= 0) {
       return res.status(400).json({ error: 'Invalid totalLength parameter' });
     }
 
-    if (!cutDuration || cutDuration <= 0) {
+    if (!Number.isFinite(cutDuration) || cutDuration <= 0) {
       return res.status(400).json({ error: 'Invalid cutDuration parameter' });
     }
 
     if (cutDuration > totalLength) {
-      return res.status(400).json({ 
-        error: 'cutDuration cannot be greater than totalLength' 
+      return res.status(400).json({
+        error: 'cutDuration cannot be greater than totalLength',
       });
     }
 
@@ -121,8 +184,8 @@ app.get('*', (req, res, next) => {
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ 
-        error: 'File too large. Maximum size is 2GB.'
+      return res.status(413).json({
+        error: `File too large. Maximum size is ${maxUploadLabel}.`,
       });
     }
     return res.status(400).json({ error: error.message });

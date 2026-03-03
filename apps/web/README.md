@@ -29,6 +29,10 @@ npm run build
 npm run preview
 ```
 
+## Environment Variables
+
+- `VITE_MAX_FILE_SIZE`: Max upload size for client-side validation (e.g. `500mb`, `2gb`, or bytes). Defaults to 2GB.
+
 ## Tech Stack
 
 - React 19.2

@@ -282,7 +282,7 @@ curl -X PATCH "${COOLIFY_API}/applications/<APP_UUID>/envs" \
 Common env vars:
 - `NODE_ENV=production`
 - `PORT=3000`
-- `MAX_FILE_SIZE=500mb`
+- `MAX_FILE_SIZE=2gb`
 
 ---
 
