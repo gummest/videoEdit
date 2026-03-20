@@ -102,6 +102,7 @@ function App() {
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [twitchError, setTwitchError] = useState(null);
   const [twitchData, setTwitchData] = useState(null);
+  const [includeAllClips, setIncludeAllClips] = useState(true);
   const [clipStart, setClipStart] = useState(() => {
     const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     return start.toISOString().slice(0, 10);
@@ -337,6 +338,7 @@ function App() {
           login: twitchChannel,
           clipStart,
           clipEnd,
+          includeAllClips,
         },
       });
       setTwitchData(response.data);
@@ -574,23 +576,45 @@ function App() {
                 />
               </div>
 
-              <div className="input-group">
-                <label>Clip Start Date</label>
-                <input
-                  type="date"
-                  value={clipStart}
-                  onChange={(e) => setClipStart(e.target.value)}
-                />
+              <div className="input-group toggle-group">
+                <label>Clip Range</label>
+                <button
+                  type="button"
+                  className={`toggle-button ${includeAllClips ? 'active' : ''}`}
+                  onClick={() => setIncludeAllClips(true)}
+                >
+                  All Time
+                </button>
+                <button
+                  type="button"
+                  className={`toggle-button ${!includeAllClips ? 'active' : ''}`}
+                  onClick={() => setIncludeAllClips(false)}
+                >
+                  Date Range
+                </button>
               </div>
 
-              <div className="input-group">
-                <label>Clip End Date</label>
-                <input
-                  type="date"
-                  value={clipEnd}
-                  onChange={(e) => setClipEnd(e.target.value)}
-                />
-              </div>
+              {!includeAllClips && (
+                <>
+                  <div className="input-group">
+                    <label>Clip Start Date</label>
+                    <input
+                      type="date"
+                      value={clipStart}
+                      onChange={(e) => setClipStart(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="input-group">
+                    <label>Clip End Date</label>
+                    <input
+                      type="date"
+                      value={clipEnd}
+                      onChange={(e) => setClipEnd(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <button
@@ -613,6 +637,15 @@ function App() {
                   <div>
                     <h3>{twitchData.broadcaster?.displayName}</h3>
                     <p>@{twitchData.broadcaster?.login}</p>
+                    <div className="twitch-meta">
+                      <span>{twitchData.vods?.length || 0} VODs</span>
+                      <span>{twitchData.clips?.length || 0} Clips</span>
+                      <span>
+                        {twitchData.clipWindow?.allTime
+                          ? 'All-time clips'
+                          : `${formatDate(twitchData.clipWindow?.start)} → ${formatDate(twitchData.clipWindow?.end)}`}
+                      </span>
+                    </div>
                   </div>
                   {twitchData.broadcaster?.profileImageUrl && (
                     <img

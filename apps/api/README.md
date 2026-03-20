@@ -57,6 +57,7 @@ List Twitch VODs (archives) and clips for a channel.
 - `broadcasterId`: Twitch broadcaster ID (optional alternative)
 - `clipStart`: ISO date (e.g. `2026-03-01`) for clip range
 - `clipEnd`: ISO date (e.g. `2026-03-20`) for clip range
+- `includeAllClips`: `true` (default) to fetch all clips across channel history
 
 **Response:**
 ```json
@@ -71,7 +72,8 @@ List Twitch VODs (archives) and clips for a channel.
   "clips": [],
   "clipWindow": {
     "start": "2026-03-01T00:00:00.000Z",
-    "end": "2026-03-20T00:00:00.000Z"
+    "end": "2026-03-20T00:00:00.000Z",
+    "allTime": false
   }
 }
 ```

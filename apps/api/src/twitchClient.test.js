@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearCachedToken, getAppAccessToken } from './twitchClient.js';
+import { buildClipWindows, clearCachedToken, getAppAccessToken } from './twitchClient.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -44,4 +44,15 @@ test('getAppAccessToken throws when env vars are missing', async () => {
   clearCachedToken();
 
   await assert.rejects(() => getAppAccessToken(), /Missing required Twitch environment variable/);
+});
+
+test('buildClipWindows splits range into windows', () => {
+  const start = new Date('2026-01-01T00:00:00.000Z');
+  const end = new Date('2026-03-01T00:00:00.000Z');
+
+  const windows = buildClipWindows(start, end, 30);
+
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].start.toISOString(), '2026-01-01T00:00:00.000Z');
+  assert.equal(windows[1].end.toISOString(), '2026-03-01T00:00:00.000Z');
 });

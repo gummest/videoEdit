@@ -3,7 +3,13 @@ import multer from 'multer';
 import cors from 'cors';
 import { processVideo } from './videoProcessor.js';
 import { cleanupTempFiles } from './utils.js';
-import { fetchAllClips, fetchAllVideos, fetchClipById, fetchUserByLogin } from './twitchClient.js';
+import {
+  fetchAllClips,
+  fetchAllClipsAllTime,
+  fetchAllVideos,
+  fetchClipById,
+  fetchUserByLogin,
+} from './twitchClient.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -173,24 +179,31 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
 // Twitch library endpoints
 app.get('/api/twitch/library', async (req, res) => {
   try {
-    const { login, broadcasterId, clipStart, clipEnd } = req.query;
+    const { login, broadcasterId, clipStart, clipEnd, includeAllClips } = req.query;
 
     if (!login && !broadcasterId) {
       return res.status(400).json({ error: 'Provide a Twitch channel login or broadcasterId.' });
     }
 
-    const clipStartDate = clipStart ? new Date(clipStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const clipEndDate = clipEnd ? new Date(clipEnd) : new Date();
+    const user = login ? await fetchUserByLogin(login) : { id: broadcasterId, display_name: broadcasterId, login: broadcasterId };
+
+    const includeAll = includeAllClips !== 'false';
+    const clipStartDate = includeAll
+      ? new Date(user.created_at || Date.now() - 365 * 24 * 60 * 60 * 1000)
+      : (clipStart ? new Date(clipStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const clipEndDate = includeAll
+      ? new Date()
+      : (clipEnd ? new Date(clipEnd) : new Date());
 
     if (Number.isNaN(clipStartDate.getTime()) || Number.isNaN(clipEndDate.getTime())) {
       return res.status(400).json({ error: 'Invalid clipStart or clipEnd date.' });
     }
 
-    const user = login ? await fetchUserByLogin(login) : { id: broadcasterId, display_name: broadcasterId, login: broadcasterId };
-
     const [vods, clips] = await Promise.all([
       fetchAllVideos(user.id),
-      fetchAllClips(user.id, clipStartDate.toISOString(), clipEndDate.toISOString()),
+      includeAll
+        ? fetchAllClipsAllTime(user.id, user.created_at)
+        : fetchAllClips(user.id, clipStartDate.toISOString(), clipEndDate.toISOString()),
     ]);
 
     return res.json({
@@ -205,6 +218,7 @@ app.get('/api/twitch/library', async (req, res) => {
       clipWindow: {
         start: clipStartDate.toISOString(),
         end: clipEndDate.toISOString(),
+        allTime: includeAll,
       },
     });
   } catch (error) {

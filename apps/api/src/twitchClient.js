@@ -80,6 +80,40 @@ const fetchAllPages = async (path, params = {}) => {
   return items;
 };
 
+export const buildClipWindows = (startDate, endDate, windowDays = 30) => {
+  const windows = [];
+  const end = new Date(endDate);
+  let cursor = new Date(startDate);
+
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) {
+    return windows;
+  }
+
+  const stepMs = windowDays * 24 * 60 * 60 * 1000;
+
+  while (cursor < end) {
+    const next = new Date(Math.min(cursor.getTime() + stepMs, end.getTime()));
+    windows.push({ start: new Date(cursor), end: next });
+    cursor = next;
+  }
+
+  return windows;
+};
+
+export const fetchAllClipsAllTime = async (broadcasterId, createdAt, windowDays = 30) => {
+  const startDate = createdAt ? new Date(createdAt) : new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+  const endDate = new Date();
+  const windows = buildClipWindows(startDate, endDate, windowDays);
+  const allClips = [];
+
+  for (const window of windows) {
+    const clips = await fetchAllClips(broadcasterId, window.start.toISOString(), window.end.toISOString());
+    allClips.push(...clips);
+  }
+
+  return allClips;
+};
+
 export const fetchUserByLogin = async (login) => {
   const data = await twitchFetch('/users', { login });
   const user = data.data?.[0];
