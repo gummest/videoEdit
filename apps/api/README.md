@@ -48,6 +48,45 @@ Health check endpoint.
 }
 ```
 
+### `GET /api/twitch/library`
+
+List Twitch VODs (archives) and clips for a channel.
+
+**Query Params:**
+- `login`: Twitch channel login (required unless `broadcasterId` provided)
+- `broadcasterId`: Twitch broadcaster ID (optional alternative)
+- `clipStart`: ISO date (e.g. `2026-03-01`) for clip range
+- `clipEnd`: ISO date (e.g. `2026-03-20`) for clip range
+
+**Response:**
+```json
+{
+  "broadcaster": {
+    "id": "123",
+    "login": "creator",
+    "displayName": "Creator",
+    "profileImageUrl": "https://..."
+  },
+  "vods": [],
+  "clips": [],
+  "clipWindow": {
+    "start": "2026-03-01T00:00:00.000Z",
+    "end": "2026-03-20T00:00:00.000Z"
+  }
+}
+```
+
+### `GET /api/twitch/clip-download`
+
+Download a Twitch clip MP4 via the backend.
+
+**Query Params:**
+- `clipId`: Twitch clip ID
+
+**Response:**
+- Success: MP4 file stream
+- Error: JSON with error message
+
 ## Installation
 
 ```bash
@@ -70,6 +109,10 @@ npm start
 
 - `PORT`: Server port (default: 3000)
 - `MAX_FILE_SIZE`: Max upload size (e.g. `500mb`, `2gb`, or bytes). Defaults to 2GB.
+- `TWITCH_CLIENT_ID`: Twitch app client ID (required for Twitch endpoints)
+- `TWITCH_CLIENT_SECRET`: Twitch app client secret (required for Twitch endpoints)
+
+Twitch access tokens are stored in memory only and refreshed as needed.
 
 ## Algorithm
 

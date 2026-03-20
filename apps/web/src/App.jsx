@@ -62,6 +62,28 @@ const MAX_FILE_SIZE_BYTES =
   parseFileSize(import.meta.env.VITE_MAX_FILE_SIZE) || DEFAULT_MAX_FILE_SIZE_BYTES;
 const MAX_FILE_SIZE_LABEL = formatBytesLabel(MAX_FILE_SIZE_BYTES);
 
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+};
+
+const formatClipDuration = (seconds) => `${Math.round(seconds)}s`;
+
+const formatDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+};
+
 function App() {
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreview, setVideoPreview] = useState(null);
@@ -74,7 +96,20 @@ function App() {
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  
+  const [activeTab, setActiveTab] = useState('local');
+
+  const [twitchChannel, setTwitchChannel] = useState('');
+  const [twitchLoading, setTwitchLoading] = useState(false);
+  const [twitchError, setTwitchError] = useState(null);
+  const [twitchData, setTwitchData] = useState(null);
+  const [clipStart, setClipStart] = useState(() => {
+    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    return start.toISOString().slice(0, 10);
+  });
+  const [clipEnd, setClipEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedTwitch, setSelectedTwitch] = useState(null);
+  const [clipImporting, setClipImporting] = useState(null);
+
   const fileInputRef = useRef(null);
 
   const handleDrag = (e) => {
@@ -83,7 +118,6 @@ function App() {
     if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
     } else if (e.type === "dragleave") {
-      // Only set to false if dragging out of the zone completely
       if (e.currentTarget === e.target) {
         setDragActive(false);
       }
@@ -94,7 +128,7 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileSelect(e.dataTransfer.files[0]);
     }
@@ -105,10 +139,9 @@ function App() {
       console.warn('No file provided to handleFileSelect');
       return;
     }
-    
+
     console.log('File selected:', { name: file.name, size: file.size, type: file.type });
-    
-    // Validate file type
+
     const fileExt = file.name?.includes('.') ? `.${file.name.split('.').pop().toLowerCase()}` : '';
     const isVideoType = file.type?.startsWith('video/');
     const isVideoExtension = VIDEO_EXTENSIONS.includes(fileExt);
@@ -145,12 +178,10 @@ function App() {
     setVideoFile(file);
     setResultVideo(null);
     setUploadProgress(0);
-    
-    // Create preview URL
+
     const url = URL.createObjectURL(file);
     setVideoPreview(url);
-    
-    // Get video duration
+
     const video = document.createElement('video');
     video.preload = 'metadata';
     video.onloadedmetadata = () => {
@@ -170,7 +201,6 @@ function App() {
     if (e.target.files && e.target.files[0]) {
       handleFileSelect(e.target.files[0]);
     }
-    // Reset the input value to allow selecting the same file again
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -183,20 +213,6 @@ function App() {
       setTotalLength(presetConfig.totalLength);
       setCutDuration(presetConfig.cutDuration);
     }
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
   const handleProcess = async () => {
@@ -250,11 +266,9 @@ function App() {
     } catch (err) {
       console.error('Processing error:', err);
 
-      // Handle axios blob error response
       let errorMessage = 'Failed to process video. Please try again.';
 
       if (err.response?.data) {
-        // Error response is a blob, try to read it as text
         const errorBlob = err.response.data;
         const reader = new FileReader();
 
@@ -265,7 +279,6 @@ function App() {
             reader.readAsText(errorBlob);
           });
 
-          // Try to parse as JSON, fallback to plain text
           try {
             const errorJson = JSON.parse(errorText);
             errorMessage = errorJson.message || errorJson.error || errorText;
@@ -288,7 +301,7 @@ function App() {
 
   const handleDownload = () => {
     if (!resultVideo) return;
-    
+
     const a = document.createElement('a');
     a.href = resultVideo;
     a.download = `processed_${videoFile.name}`;
@@ -307,6 +320,55 @@ function App() {
     setUploadProgress(0);
   };
 
+  const handleFetchTwitch = async () => {
+    if (!twitchChannel) {
+      setTwitchError('Enter a Twitch channel login to continue.');
+      return;
+    }
+
+    setTwitchLoading(true);
+    setTwitchError(null);
+    setTwitchData(null);
+    setSelectedTwitch(null);
+
+    try {
+      const response = await axios.get('/api/twitch/library', {
+        params: {
+          login: twitchChannel,
+          clipStart,
+          clipEnd,
+        },
+      });
+      setTwitchData(response.data);
+    } catch (err) {
+      console.error('Failed to load Twitch library:', err);
+      setTwitchError(err.response?.data?.error || 'Failed to load Twitch library.');
+    } finally {
+      setTwitchLoading(false);
+    }
+  };
+
+  const handleImportClip = async (clip) => {
+    setClipImporting(clip.id);
+    setTwitchError(null);
+    try {
+      const response = await axios.get('/api/twitch/clip-download', {
+        params: { clipId: clip.id },
+        responseType: 'blob',
+      });
+
+      const fileName = `${clip.title || 'twitch-clip'}.mp4`;
+      const file = new File([response.data], fileName, { type: 'video/mp4' });
+      handleFileSelect(file);
+      setActiveTab('local');
+    } catch (err) {
+      console.error('Failed to import clip:', err);
+      setTwitchError('Clip import failed. Please try again.');
+    } finally {
+      setClipImporting(null);
+    }
+  };
+
   return (
     <div className="app-container">
       <div className="main-content">
@@ -315,179 +377,334 @@ function App() {
           <p>Upload, configure, and process your videos</p>
         </div>
 
-        <div className="upload-card">
-          {/* File Upload Zone */}
-          <div
-            className={`upload-zone ${dragActive ? 'active' : ''}`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => {
-              if (fileInputRef.current) {
-                fileInputRef.current.click();
-              }
-            }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+        <div className="tab-switcher" role="tablist" aria-label="Video sources">
+          <button
+            className={`tab-button ${activeTab === 'local' ? 'active' : ''}`}
+            onClick={() => setActiveTab('local')}
+            role="tab"
+            aria-selected={activeTab === 'local'}
+          >
+            Local Upload
+          </button>
+          <button
+            className={`tab-button ${activeTab === 'twitch' ? 'active' : ''}`}
+            onClick={() => setActiveTab('twitch')}
+            role="tab"
+            aria-selected={activeTab === 'twitch'}
+          >
+            Twitch Library
+          </button>
+        </div>
+
+        {activeTab === 'local' && (
+          <div className="upload-card">
+            <div
+              className={`upload-zone ${dragActive ? 'active' : ''}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => {
                 if (fileInputRef.current) {
                   fileInputRef.current.click();
                 }
-              }
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/*"
-              onChange={handleFileInputChange}
-              className="hidden"
-              aria-label="Upload video file"
-            />
-            
-            {videoFile ? (
-              <div>
-                <svg className="upload-icon success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <div className="file-info">
-                  <h3>{videoFile.name}</h3>
-                  <p>
-                    {formatFileSize(videoFile.size)}
-                    {videoDuration && ` • ${formatTime(videoDuration)}`}
-                  </p>
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (fileInputRef.current) {
+                    fileInputRef.current.click();
+                  }
+                }
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleFileInputChange}
+                className="hidden"
+                aria-label="Upload video file"
+              />
+
+              {videoFile ? (
+                <div>
+                  <svg className="upload-icon success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="file-info">
+                    <h3>{videoFile.name}</h3>
+                    <p>
+                      {formatFileSize(videoFile.size)}
+                      {videoDuration && ` • ${formatTime(videoDuration)}`}
+                    </p>
+                  </div>
+                  {videoPreview && (
+                    <video
+                      src={videoPreview}
+                      controls
+                      className="video-preview"
+                    />
+                  )}
+                  <button onClick={handleReset} className="change-file-btn">
+                    Choose different file
+                  </button>
                 </div>
-                {videoPreview && (
-                  <video 
-                    src={videoPreview} 
-                    controls 
-                    className="video-preview"
-                  />
-                )}
-                <button onClick={handleReset} className="change-file-btn">
-                  Choose different file
-                </button>
+              ) : (
+                <div>
+                  <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="upload-text">Drag and drop your video here</p>
+                  <p className="upload-subtext">or click to browse</p>
+                  <p className="upload-limit">Max file size {MAX_FILE_SIZE_LABEL}</p>
+                </div>
+              )}
+            </div>
+
+            {error && !videoFile && (
+              <div className="error-box" role="alert">
+                <p>{error}</p>
               </div>
-            ) : (
-              <div>
-                <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <p className="upload-text">Drag and drop your video here</p>
-                <p className="upload-subtext">or click to browse</p>
-                <p className="upload-limit">Max file size {MAX_FILE_SIZE_LABEL}</p>
+            )}
+
+            {videoFile && (
+              <div className="config-section">
+                <h3>Configuration</h3>
+
+                <div className="presets">
+                  {Object.entries(PRESETS).map(([key, config]) => (
+                    <div
+                      key={key}
+                      className={`preset-option ${preset === key ? 'selected' : ''}`}
+                      onClick={() => handlePresetChange(key)}
+                    >
+                      <input
+                        type="radio"
+                        name="preset"
+                        value={key}
+                        checked={preset === key}
+                        onChange={() => handlePresetChange(key)}
+                      />
+                      <label>{config.label}</label>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="inputs-grid">
+                  <div className="input-group">
+                    <label>Total Output Length (seconds)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={totalLength}
+                      onChange={(e) => {
+                        setTotalLength(parseInt(e.target.value) || 0);
+                        setPreset('custom');
+                      }}
+                    />
+                    <p className="input-hint">≈ {formatTime(totalLength)}</p>
+                  </div>
+
+                  <div className="input-group">
+                    <label>Cut Duration (seconds)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={cutDuration}
+                      onChange={(e) => {
+                        setCutDuration(parseInt(e.target.value) || 0);
+                        setPreset('custom');
+                      }}
+                    />
+                    <p className="input-hint">≈ {Math.floor(totalLength / cutDuration)} cuts</p>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="error-box" role="alert">
+                    <p>{error}</p>
+                  </div>
+                )}
+
+                <button onClick={handleProcess} disabled={loading} className="process-btn">
+                  {loading ? (
+                    <>
+                      <div className="spinner"></div>
+                      {uploadProgress > 0 && uploadProgress < 100
+                        ? `Uploading... ${uploadProgress}%`
+                        : 'Processing...'}
+                    </>
+                  ) : (
+                    'Process Video'
+                  )}
+                </button>
+                {loading && (
+                  <div className="progress-container" aria-live="polite">
+                    <div className="progress-track">
+                      <div className="progress-bar" style={{ width: `${uploadProgress}%` }}></div>
+                    </div>
+                    <p className="progress-text">Upload progress: {uploadProgress}%</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
+        )}
 
-          {error && !videoFile && (
-            <div className="error-box" role="alert">
-              <p>{error}</p>
+        {activeTab === 'twitch' && (
+          <div className="upload-card">
+            <div className="twitch-header">
+              <div>
+                <h2>Twitch Library</h2>
+                <p>Browse VODs and clips, then import a clip for editing.</p>
+              </div>
             </div>
-          )}
 
-          {/* Configuration Form */}
-          {videoFile && (
-            <div className="config-section">
-              <h3>Configuration</h3>
-              
-              {/* Preset Options */}
-              <div className="presets">
-                {Object.entries(PRESETS).map(([key, config]) => (
-                  <div
-                    key={key}
-                    className={`preset-option ${preset === key ? 'selected' : ''}`}
-                    onClick={() => handlePresetChange(key)}
-                  >
-                    <input
-                      type="radio"
-                      name="preset"
-                      value={key}
-                      checked={preset === key}
-                      onChange={() => handlePresetChange(key)}
+            <div className="twitch-form">
+              <div className="input-group">
+                <label>Twitch Channel Login</label>
+                <input
+                  type="text"
+                  value={twitchChannel}
+                  onChange={(e) => setTwitchChannel(e.target.value.trim())}
+                  placeholder="e.g. creatorname"
+                />
+              </div>
+
+              <div className="input-group">
+                <label>Clip Start Date</label>
+                <input
+                  type="date"
+                  value={clipStart}
+                  onChange={(e) => setClipStart(e.target.value)}
+                />
+              </div>
+
+              <div className="input-group">
+                <label>Clip End Date</label>
+                <input
+                  type="date"
+                  value={clipEnd}
+                  onChange={(e) => setClipEnd(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <button
+              className="process-btn"
+              onClick={handleFetchTwitch}
+              disabled={twitchLoading}
+            >
+              {twitchLoading ? 'Loading Twitch library...' : 'Load Twitch Videos'}
+            </button>
+
+            {twitchError && (
+              <div className="error-box" role="alert">
+                <p>{twitchError}</p>
+              </div>
+            )}
+
+            {twitchData && (
+              <div className="twitch-results">
+                <div className="twitch-summary">
+                  <div>
+                    <h3>{twitchData.broadcaster?.displayName}</h3>
+                    <p>@{twitchData.broadcaster?.login}</p>
+                  </div>
+                  {twitchData.broadcaster?.profileImageUrl && (
+                    <img
+                      src={twitchData.broadcaster.profileImageUrl}
+                      alt="Twitch profile"
+                      className="twitch-avatar"
                     />
-                    <label>{config.label}</label>
+                  )}
+                </div>
+
+                <div className="twitch-section">
+                  <h4>VODs</h4>
+                  <div className="twitch-grid">
+                    {twitchData.vods?.map((vod) => (
+                      <div
+                        key={vod.id}
+                        className={`twitch-card ${selectedTwitch?.id === vod.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedTwitch({ ...vod, type: 'vod' })}
+                      >
+                        <img src={vod.thumbnail_url} alt={vod.title} />
+                        <div className="twitch-card-body">
+                          <h5>{vod.title}</h5>
+                          <p>{formatDate(vod.created_at)} • {vod.duration}</p>
+                          <div className="twitch-card-actions">
+                            <a href={vod.url} target="_blank" rel="noreferrer">Open in Twitch</a>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {!twitchData.vods?.length && (
+                      <p className="twitch-empty">No VODs found for this channel.</p>
+                    )}
                   </div>
-                ))}
-              </div>
-
-              {/* Custom Inputs */}
-              <div className="inputs-grid">
-                <div className="input-group">
-                  <label>Total Output Length (seconds)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={totalLength}
-                    onChange={(e) => {
-                      setTotalLength(parseInt(e.target.value) || 0);
-                      setPreset('custom');
-                    }}
-                  />
-                  <p className="input-hint">≈ {formatTime(totalLength)}</p>
                 </div>
 
-                <div className="input-group">
-                  <label>Cut Duration (seconds)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={cutDuration}
-                    onChange={(e) => {
-                      setCutDuration(parseInt(e.target.value) || 0);
-                      setPreset('custom');
-                    }}
-                  />
-                  <p className="input-hint">≈ {Math.floor(totalLength / cutDuration)} cuts</p>
+                <div className="twitch-section">
+                  <h4>Clips</h4>
+                  <div className="twitch-grid">
+                    {twitchData.clips?.map((clip) => (
+                      <div
+                        key={clip.id}
+                        className={`twitch-card ${selectedTwitch?.id === clip.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedTwitch({ ...clip, type: 'clip' })}
+                      >
+                        <img src={clip.thumbnail_url} alt={clip.title} />
+                        <div className="twitch-card-body">
+                          <h5>{clip.title}</h5>
+                          <p>{formatDate(clip.created_at)} • {formatClipDuration(clip.duration)}</p>
+                          <div className="twitch-card-actions">
+                            <a href={clip.url} target="_blank" rel="noreferrer">Open in Twitch</a>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleImportClip(clip);
+                              }}
+                              disabled={clipImporting === clip.id}
+                            >
+                              {clipImporting === clip.id ? 'Importing...' : 'Import Clip'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {!twitchData.clips?.length && (
+                      <p className="twitch-empty">No clips found for this date range.</p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Error Display */}
-              {error && (
-                <div className="error-box" role="alert">
-                  <p>{error}</p>
-                </div>
-              )}
-
-              {/* Process Button */}
-              <button onClick={handleProcess} disabled={loading} className="process-btn">
-                {loading ? (
-                  <>
-                    <div className="spinner"></div>
-                    {uploadProgress > 0 && uploadProgress < 100
-                      ? `Uploading... ${uploadProgress}%`
-                      : 'Processing...'}
-                  </>
-                ) : (
-                  'Process Video'
+                {selectedTwitch && (
+                  <div className="twitch-selection">
+                    <h4>Selected {selectedTwitch.type === 'vod' ? 'VOD' : 'Clip'}</h4>
+                    <p>{selectedTwitch.title}</p>
+                    <p className="twitch-selection-meta">{selectedTwitch.url}</p>
+                  </div>
                 )}
-              </button>
-              {loading && (
-                <div className="progress-container" aria-live="polite">
-                  <div className="progress-track">
-                    <div className="progress-bar" style={{ width: `${uploadProgress}%` }}></div>
-                  </div>
-                  <p className="progress-text">Upload progress: {uploadProgress}%</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Result Display */}
         {resultVideo && (
           <div className="result-card">
             <h3>✨ Processed Video</h3>
-            
-            <video 
-              src={resultVideo} 
-              controls 
+
+            <video
+              src={resultVideo}
+              controls
               className="result-video"
             />
-            
+
             <button onClick={handleDownload} className="download-btn">
               <svg className="download-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

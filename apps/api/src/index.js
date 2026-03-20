@@ -3,9 +3,11 @@ import multer from 'multer';
 import cors from 'cors';
 import { processVideo } from './videoProcessor.js';
 import { cleanupTempFiles } from './utils.js';
+import { fetchAllClips, fetchAllVideos, fetchClipById, fetchUserByLogin } from './twitchClient.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import { Readable } from 'stream';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -165,6 +167,85 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
         message: error.message 
       });
     }
+  }
+});
+
+// Twitch library endpoints
+app.get('/api/twitch/library', async (req, res) => {
+  try {
+    const { login, broadcasterId, clipStart, clipEnd } = req.query;
+
+    if (!login && !broadcasterId) {
+      return res.status(400).json({ error: 'Provide a Twitch channel login or broadcasterId.' });
+    }
+
+    const clipStartDate = clipStart ? new Date(clipStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const clipEndDate = clipEnd ? new Date(clipEnd) : new Date();
+
+    if (Number.isNaN(clipStartDate.getTime()) || Number.isNaN(clipEndDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid clipStart or clipEnd date.' });
+    }
+
+    const user = login ? await fetchUserByLogin(login) : { id: broadcasterId, display_name: broadcasterId, login: broadcasterId };
+
+    const [vods, clips] = await Promise.all([
+      fetchAllVideos(user.id),
+      fetchAllClips(user.id, clipStartDate.toISOString(), clipEndDate.toISOString()),
+    ]);
+
+    return res.json({
+      broadcaster: {
+        id: user.id,
+        login: user.login,
+        displayName: user.display_name,
+        profileImageUrl: user.profile_image_url,
+      },
+      vods,
+      clips,
+      clipWindow: {
+        start: clipStartDate.toISOString(),
+        end: clipEndDate.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Twitch library error:', error.message);
+    return res.status(500).json({
+      error: 'Failed to load Twitch library. Check server credentials and try again.',
+    });
+  }
+});
+
+app.get('/api/twitch/clip-download', async (req, res) => {
+  try {
+    const { clipId } = req.query;
+    if (!clipId) {
+      return res.status(400).json({ error: 'Missing clipId.' });
+    }
+
+    const clip = await fetchClipById(clipId);
+    const thumbnailUrl = clip.thumbnail_url || '';
+    const mp4Url = thumbnailUrl.replace(/-preview.*\.(jpg|png)/i, '.mp4');
+
+    if (!mp4Url || mp4Url === thumbnailUrl) {
+      return res.status(400).json({ error: 'Unable to derive clip media URL.' });
+    }
+
+    const clipResponse = await fetch(mp4Url);
+    if (!clipResponse.ok) {
+      return res.status(502).json({ error: 'Failed to fetch clip media.' });
+    }
+
+    res.setHeader('Content-Type', 'video/mp4');
+    const safeTitle = clip.title?.replace(/[^a-z0-9-_ ]/gi, '').slice(0, 80) || 'twitch-clip';
+    res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp4"`);
+
+    const stream = Readable.fromWeb(clipResponse.body);
+    stream.pipe(res);
+  } catch (error) {
+    console.error('Twitch clip download error:', error.message);
+    return res.status(500).json({
+      error: 'Failed to import Twitch clip.',
+    });
   }
 });
 
