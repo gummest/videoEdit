@@ -99,6 +99,7 @@ function App() {
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [activeTab, setActiveTab] = useState('local');
 
   const [twitchChannel, setTwitchChannel] = useState('');
@@ -120,6 +121,22 @@ function App() {
   const [twitchAuthLoading, setTwitchAuthLoading] = useState(true);
 
   const fileInputRef = useRef(null);
+  const previewObjectUrlRef = useRef(null);
+  const resultObjectUrlRef = useRef(null);
+
+  const revokePreviewObjectUrl = () => {
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+  };
+
+  const revokeResultObjectUrl = () => {
+    if (resultObjectUrlRef.current) {
+      URL.revokeObjectURL(resultObjectUrlRef.current);
+      resultObjectUrlRef.current = null;
+    }
+  };
   
   // Check Twitch auth on mount
   useEffect(() => {
@@ -168,6 +185,13 @@ function App() {
     handleFetchMyTwitch();
   }, [activeTab, twitchUser]);
 
+  useEffect(() => {
+    return () => {
+      revokePreviewObjectUrl();
+      revokeResultObjectUrl();
+    };
+  }, []);
+
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -205,10 +229,13 @@ function App() {
     if (!isVideoType && !isVideoExtension) {
       setError('Please select a valid video file');
       setVideoFile(null);
+      revokePreviewObjectUrl();
       setVideoPreview(null);
       setVideoDuration(null);
+      revokeResultObjectUrl();
       setResultVideo(null);
       setUploadProgress(0);
+      setIsUploading(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -219,10 +246,13 @@ function App() {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setError(`File size must be less than ${MAX_FILE_SIZE_LABEL}`);
       setVideoFile(null);
+      revokePreviewObjectUrl();
       setVideoPreview(null);
       setVideoDuration(null);
+      revokeResultObjectUrl();
       setResultVideo(null);
       setUploadProgress(0);
+      setIsUploading(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -232,25 +262,31 @@ function App() {
 
     setError(null);
     setVideoFile(file);
-    setResultVideo(null);
     setUploadProgress(0);
+    setIsUploading(false);
 
-    const url = URL.createObjectURL(file);
-    setVideoPreview(url);
+    revokeResultObjectUrl();
+    setResultVideo(null);
 
+    revokePreviewObjectUrl();
+    const previewUrl = URL.createObjectURL(file);
+    previewObjectUrlRef.current = previewUrl;
+    setVideoPreview(previewUrl);
+
+    const metadataUrl = URL.createObjectURL(file);
     const video = document.createElement('video');
     video.preload = 'metadata';
     video.onloadedmetadata = () => {
-      window.URL.revokeObjectURL(video.src);
+      URL.revokeObjectURL(metadataUrl);
       const duration = Math.floor(video.duration);
       setVideoDuration(duration);
       console.log('Video duration:', duration);
     };
     video.onerror = () => {
       console.error('Failed to load video metadata');
-      window.URL.revokeObjectURL(video.src);
+      URL.revokeObjectURL(metadataUrl);
     };
-    video.src = url;
+    video.src = metadataUrl;
   };
 
   const handleFileInputChange = (e) => {
@@ -294,8 +330,12 @@ function App() {
 
     setLoading(true);
     setError(null);
+    revokeResultObjectUrl();
     setResultVideo(null);
     setUploadProgress(0);
+    setIsUploading(true);
+
+    let uploadPhaseTimeout = null;
 
     try {
       const formData = new FormData();
@@ -309,15 +349,40 @@ function App() {
         },
         responseType: 'blob',
         onUploadProgress: (progressEvent) => {
-          if (!progressEvent.total) return;
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          if (!progressEvent.total) {
+            return;
+          }
+
+          const percentCompleted = Math.min(
+            100,
+            Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          );
+
           setUploadProgress(percentCompleted);
           console.log('Upload progress:', percentCompleted);
+
+          if (percentCompleted >= 100) {
+            setIsUploading(false);
+            if (uploadPhaseTimeout) {
+              clearTimeout(uploadPhaseTimeout);
+              uploadPhaseTimeout = null;
+            }
+            return;
+          }
+
+          if (uploadPhaseTimeout) {
+            clearTimeout(uploadPhaseTimeout);
+          }
+
+          uploadPhaseTimeout = setTimeout(() => {
+            setIsUploading(false);
+          }, 1200);
         }
       });
 
       const videoBlob = new Blob([response.data], { type: 'video/mp4' });
       const videoUrl = URL.createObjectURL(videoBlob);
+      resultObjectUrlRef.current = videoUrl;
       setResultVideo(videoUrl);
     } catch (err) {
       console.error('Processing error:', err);
@@ -351,6 +416,10 @@ function App() {
 
       setError(errorMessage);
     } finally {
+      if (uploadPhaseTimeout) {
+        clearTimeout(uploadPhaseTimeout);
+      }
+      setIsUploading(false);
       setLoading(false);
     }
   };
@@ -369,11 +438,14 @@ function App() {
   const handleReset = (e) => {
     e.stopPropagation();
     setVideoFile(null);
+    revokePreviewObjectUrl();
     setVideoPreview(null);
     setVideoDuration(null);
+    revokeResultObjectUrl();
     setResultVideo(null);
     setError(null);
     setUploadProgress(0);
+    setIsUploading(false);
   };
 
   const handleTwitchLogin = () => {
@@ -647,7 +719,7 @@ function App() {
                   {loading ? (
                     <>
                       <div className="spinner"></div>
-                      {uploadProgress > 0 && uploadProgress < 100
+                      {isUploading
                         ? `Uploading... ${uploadProgress}%`
                         : 'Processing...'}
                     </>
@@ -660,7 +732,9 @@ function App() {
                     <div className="progress-track">
                       <div className="progress-bar" style={{ width: `${uploadProgress}%` }}></div>
                     </div>
-                    <p className="progress-text">Upload progress: {uploadProgress}%</p>
+                    <p className="progress-text">
+                      {isUploading ? `Upload progress: ${uploadProgress}%` : 'Upload complete. Processing video...'}
+                    </p>
                   </div>
                 )}
               </div>
