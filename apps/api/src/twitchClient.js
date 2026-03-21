@@ -321,14 +321,3 @@ export const probeClipMediaCandidates = async (
 export const clearCachedToken = () => {
   cachedToken = null;
 };
-oken = () => {
-  cachedToken = null;
-};
-hedToken = null;
-};
- () => {
-  cachedToken = null;
-};
- clearCachedToken = () => {
-  cachedToken = null;
-};
