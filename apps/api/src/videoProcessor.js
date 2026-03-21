@@ -20,9 +20,11 @@ async function getVideoInfo(filePath) {
 /**
  * Extract a segment from the video
  */
-async function extractSegment(inputPath, outputPath, startTime, duration) {
+async function extractSegment(inputPath, outputPath, startTime, duration, options = {}) {
+  const stageTimeoutMs = Number(options.stageTimeoutMs) || 0;
+
   return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
+    const command = ffmpeg(inputPath)
       .setStartTime(startTime)
       .setDuration(duration)
       .output(outputPath)
@@ -31,9 +33,32 @@ async function extractSegment(inputPath, outputPath, startTime, duration) {
         '-c:a aac',         // Re-encode audio
         '-preset ultrafast', // Fast encoding
         '-avoid_negative_ts make_zero'
-      ])
-      .on('end', () => resolve(outputPath))
-      .on('error', reject)
+      ]);
+
+    let timer = null;
+    const clear = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    if (stageTimeoutMs > 0) {
+      timer = setTimeout(() => {
+        command.kill('SIGKILL');
+        reject(new Error(`ffmpeg segment extraction timed out after ${stageTimeoutMs}ms`));
+      }, stageTimeoutMs);
+    }
+
+    command
+      .on('end', () => {
+        clear();
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        clear();
+        reject(err);
+      })
       .run();
   });
 }
@@ -44,7 +69,9 @@ async function extractSegment(inputPath, outputPath, startTime, duration) {
  * @param {string} outputPath - Output file path
  * @param {boolean} hasAudio - Whether segments have audio streams
  */
-async function concatenateSegments(segmentPaths, outputPath, hasAudio = true) {
+async function concatenateSegments(segmentPaths, outputPath, hasAudio = true, options = {}) {
+  const stageTimeoutMs = Number(options.stageTimeoutMs) || 0;
+
   return new Promise((resolve, reject) => {
     const command = ffmpeg();
 
@@ -68,12 +95,33 @@ async function concatenateSegments(segmentPaths, outputPath, hasAudio = true) {
       outputOptions = ['-map', '[outv]'];
     }
 
+    let timer = null;
+    const clear = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    if (stageTimeoutMs > 0) {
+      timer = setTimeout(() => {
+        command.kill('SIGKILL');
+        reject(new Error(`ffmpeg concatenation timed out after ${stageTimeoutMs}ms`));
+      }, stageTimeoutMs);
+    }
+
     command
       .complexFilter(filterComplex)
       .outputOptions(outputOptions)
       .output(outputPath)
-      .on('end', () => resolve(outputPath))
-      .on('error', reject)
+      .on('end', () => {
+        clear();
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        clear();
+        reject(err);
+      })
       .on('progress', (progress) => {
         if (progress.percent) {
           console.log(`Concatenation progress: ${Math.round(progress.percent)}%`);
@@ -94,7 +142,21 @@ async function concatenateSegments(segmentPaths, outputPath, hasAudio = true) {
  * 5. Concatenate all segments (adapt for video-only if no audio)
  * 6. Return the output file path
  */
-export async function processVideo(inputPath, totalLength, cutDuration) {
+export async function processVideo(inputPath, totalLength, cutDuration, options = {}) {
+  const processingTimeoutMs = Number(options.processingTimeoutMs) || 0;
+  const stageTimeoutMs = Number(options.stageTimeoutMs) || 0;
+  const requestId = options.requestId || 'n/a';
+
+  const timeoutGuard = (promise) => {
+    if (!processingTimeoutMs || processingTimeoutMs <= 0) return promise;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Video processing timed out after ${processingTimeoutMs}ms`)), processingTimeoutMs);
+      })
+    ]);
+  };
+
   const { duration: videoDuration, hasAudio } = await getVideoInfo(inputPath);
 
   if (!Number.isFinite(videoDuration) || videoDuration <= 0) {
@@ -140,8 +202,8 @@ export async function processVideo(inputPath, totalLength, cutDuration) {
       if (startTime + cutDuration > videoDuration) break;
       
       const segmentPath = path.join(outputDir, `segment_begin_${timestamp}_${i}.mp4`);
-      console.log(`Extracting beginning cut ${i + 1}/${beginCuts} at ${startTime}s`);
-      await extractSegment(inputPath, segmentPath, startTime, cutDuration);
+      console.log(`Extracting beginning cut ${i + 1}/${beginCuts} at ${startTime}s`, { requestId });
+      await extractSegment(inputPath, segmentPath, startTime, cutDuration, { stageTimeoutMs });
       segmentPaths.push(segmentPath);
     }
 
@@ -152,8 +214,8 @@ export async function processVideo(inputPath, totalLength, cutDuration) {
       if (startTime < 0 || startTime + cutDuration > videoDuration) continue;
       
       const segmentPath = path.join(outputDir, `segment_middle_${timestamp}_${i}.mp4`);
-      console.log(`Extracting middle cut ${i + 1}/${middleCuts} at ${startTime.toFixed(2)}s`);
-      await extractSegment(inputPath, segmentPath, startTime, cutDuration);
+      console.log(`Extracting middle cut ${i + 1}/${middleCuts} at ${startTime.toFixed(2)}s`, { requestId });
+      await extractSegment(inputPath, segmentPath, startTime, cutDuration, { stageTimeoutMs });
       segmentPaths.push(segmentPath);
     }
 
@@ -164,8 +226,8 @@ export async function processVideo(inputPath, totalLength, cutDuration) {
       if (startTime < 0 || startTime + cutDuration > videoDuration) continue;
       
       const segmentPath = path.join(outputDir, `segment_end_${timestamp}_${i}.mp4`);
-      console.log(`Extracting end cut ${i + 1}/${endCuts} at ${startTime.toFixed(2)}s`);
-      await extractSegment(inputPath, segmentPath, startTime, cutDuration);
+      console.log(`Extracting end cut ${i + 1}/${endCuts} at ${startTime.toFixed(2)}s`, { requestId });
+      await extractSegment(inputPath, segmentPath, startTime, cutDuration, { stageTimeoutMs });
       segmentPaths.push(segmentPath);
     }
 
@@ -175,8 +237,8 @@ export async function processVideo(inputPath, totalLength, cutDuration) {
 
     // Concatenate all segments (pass hasAudio flag for proper filter)
     const outputPath = path.join(outputDir, `processed_${timestamp}.mp4`);
-    console.log(`Concatenating ${segmentPaths.length} segments (hasAudio: ${hasAudio})...`);
-    await concatenateSegments(segmentPaths, outputPath, hasAudio);
+    console.log(`Concatenating ${segmentPaths.length} segments (hasAudio: ${hasAudio})...`, { requestId });
+    await timeoutGuard(concatenateSegments(segmentPaths, outputPath, hasAudio, { stageTimeoutMs }));
 
     // Cleanup segment files
     console.log('Cleaning up temporary segments...');

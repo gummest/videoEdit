@@ -29,6 +29,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS || 8 * 60 * 1000);
+const PROCESSING_STAGE_TIMEOUT_MS = Number(process.env.PROCESSING_STAGE_TIMEOUT_MS || 2 * 60 * 1000);
 
 app.use((req, res, next) => {
   req.requestId = req.headers['x-request-id'] || randomUUID();
@@ -182,11 +184,21 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
       });
     }
 
-    console.log(`Processing video: ${req.file.originalname}`);
-    console.log(`Total length: ${totalLength}s, Cut duration: ${cutDuration}s`);
+    const startedAt = Date.now();
+    const requestId = req.requestId;
 
-    // Process the video
-    outputPath = await processVideo(inputPath, totalLength, cutDuration);
+    console.log(`[process][${requestId}] Processing video: ${req.file.originalname}`);
+    console.log(`[process][${requestId}] Total length: ${totalLength}s, Cut duration: ${cutDuration}s`);
+
+    // Process the video with hard timeout controls.
+    outputPath = await processVideo(inputPath, totalLength, cutDuration, {
+      requestId,
+      processingTimeoutMs: PROCESSING_TIMEOUT_MS,
+      stageTimeoutMs: PROCESSING_STAGE_TIMEOUT_MS,
+    });
+
+    const durationMs = Date.now() - startedAt;
+    res.setHeader('X-Processing-Duration-Ms', String(durationMs));
 
     // Send the processed video
     res.download(outputPath, `processed_${req.file.originalname}`, async (err) => {
@@ -194,22 +206,32 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
       await cleanupTempFiles([inputPath, outputPath]);
       
       if (err && !res.headersSent) {
-        console.error('Error sending file:', err);
-        res.status(500).json({ error: 'Error sending processed video' });
+        console.error(`[process][${requestId}] Error sending file:`, err);
+        res.status(500).json({
+          error: 'Error sending processed video',
+          requestId,
+        });
+      }
+
+      if (!err) {
+        console.log(`[process][${requestId}] Completed in ${durationMs}ms`);
       }
     });
 
   } catch (error) {
-    console.error('Video processing error:', error);
+    const requestId = req.requestId;
+    console.error(`[process][${requestId}] Video processing error:`, error);
     
     // Cleanup on error
     if (inputPath) await cleanupTempFiles([inputPath]);
     if (outputPath) await cleanupTempFiles([outputPath]);
 
     if (!res.headersSent) {
-      res.status(500).json({ 
-        error: 'Video processing failed', 
-        message: error.message 
+      const isTimeout = /timed out/i.test(error?.message || '');
+      res.status(isTimeout ? 504 : 500).json({ 
+        error: isTimeout ? 'Video processing timeout' : 'Video processing failed',
+        message: error.message,
+        requestId,
       });
     }
   }

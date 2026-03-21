@@ -64,6 +64,7 @@ const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const MAX_FILE_SIZE_BYTES =
   parseFileSize(import.meta.env.VITE_MAX_FILE_SIZE) || DEFAULT_MAX_FILE_SIZE_BYTES;
 const MAX_FILE_SIZE_LABEL = formatBytesLabel(MAX_FILE_SIZE_BYTES);
+const CLIENT_PROCESS_TIMEOUT_MS = Number(import.meta.env.VITE_PROCESS_TIMEOUT_MS || 9 * 60 * 1000);
 
 const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60);
@@ -336,6 +337,8 @@ function App() {
     setIsUploading(true);
 
     let uploadPhaseTimeout = null;
+    let processingTimeout = null;
+    const controller = new AbortController();
 
     try {
       const formData = new FormData();
@@ -343,10 +346,15 @@ function App() {
       formData.append('totalLength', totalLength);
       formData.append('cutDuration', cutDuration);
 
+      processingTimeout = setTimeout(() => {
+        controller.abort('processing-timeout');
+      }, CLIENT_PROCESS_TIMEOUT_MS);
+
       const response = await axios.post('/api/process', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        signal: controller.signal,
         responseType: 'blob',
         onUploadProgress: (progressEvent) => {
           if (!progressEvent.total) {
@@ -410,6 +418,8 @@ function App() {
           console.error('Failed to read error response:', readErr);
           errorMessage = err.response?.statusText || errorMessage;
         }
+      } else if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') {
+        errorMessage = 'Processing timed out. The server took too long to respond. Please retry with a shorter video or try again.';
       } else if (err.message) {
         errorMessage = err.message;
       }
@@ -418,6 +428,9 @@ function App() {
     } finally {
       if (uploadPhaseTimeout) {
         clearTimeout(uploadPhaseTimeout);
+      }
+      if (processingTimeout) {
+        clearTimeout(processingTimeout);
       }
       setIsUploading(false);
       setLoading(false);
