@@ -8,8 +8,10 @@ import {
   fetchAllClips,
   fetchAllClipsAllTime,
   fetchAllVideos,
+  fetchClipAccessToken,
   fetchClipById,
   fetchUserByLogin,
+  deriveClipMp4Candidates,
 } from './twitchClient.js';
 import authRoutes, { requireTwitchAuth, userTwitchFetch } from './authRoutes.js';
 import path from 'path';
@@ -343,28 +345,59 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     }
 
     const clip = await fetchClipById(clipId);
-    const thumbnailUrl = clip.thumbnail_url || '';
-    const mp4Url = thumbnailUrl.replace(/-preview.*\.(jpg|png)/i, '.mp4');
+    const candidateUrls = deriveClipMp4Candidates(clip, clipId);
 
-    if (!mp4Url || mp4Url === thumbnailUrl) {
-      return res.status(400).json({ error: 'Unable to derive clip media URL.' });
+    let signedCandidates = [];
+    const accessToken = await fetchClipAccessToken(clipId);
+    if (accessToken) {
+      const signed = candidateUrls.map((url) => {
+        const separator = url.includes('?') ? '&' : '?';
+        return `${url}${separator}sig=${encodeURIComponent(accessToken.sig)}&token=${encodeURIComponent(accessToken.token)}`;
+      });
+
+      // Try signed URLs first when available.
+      signedCandidates = signed;
     }
 
-    const clipResponse = await fetch(mp4Url);
-    if (!clipResponse.ok) {
-      return res.status(502).json({ error: 'Failed to fetch clip media.' });
+    const attempts = [...signedCandidates, ...candidateUrls];
+
+    if (!attempts.length) {
+      return res.status(422).json({
+        error: 'Could not derive candidate media URLs from Twitch clip metadata.',
+      });
+    }
+
+    let clipResponse = null;
+    let resolvedUrl = null;
+
+    for (const candidate of attempts) {
+      const response = await fetch(candidate);
+      if (response.ok) {
+        clipResponse = response;
+        resolvedUrl = candidate;
+        break;
+      }
+    }
+
+    if (!clipResponse) {
+      return res.status(502).json({
+        error: 'Failed to fetch Twitch clip media from all known URL patterns.',
+      });
     }
 
     res.setHeader('Content-Type', 'video/mp4');
     const safeTitle = clip.title?.replace(/[^a-z0-9-_ ]/gi, '').slice(0, 80) || 'twitch-clip';
     res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp4"`);
+    if (resolvedUrl) {
+      res.setHeader('X-Clip-Source-Url', resolvedUrl);
+    }
 
     const stream = Readable.fromWeb(clipResponse.body);
     stream.pipe(res);
   } catch (error) {
     console.error('Twitch clip download error:', error.message);
     return res.status(500).json({
-      error: 'Failed to import Twitch clip.',
+      error: `Failed to import Twitch clip: ${error.message}`,
     });
   }
 });

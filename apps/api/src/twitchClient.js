@@ -142,6 +142,75 @@ export const fetchClipById = async (clipId) => {
   return clip;
 };
 
+export const deriveClipMp4Candidates = (clip = {}, clipId = '') => {
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = (value) => {
+    if (!value) return;
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    candidates.push(trimmed);
+  };
+
+  const thumbnailUrl = clip.thumbnail_url || '';
+  if (thumbnailUrl) {
+    const withoutQuery = thumbnailUrl.split('?')[0];
+
+    // Common Twitch preview formats:
+    //  - ...-preview-480x272.jpg
+    //  - ...-social-preview.jpg
+    //  - ...-preview.jpg / .png / .jpeg / .webp
+    addCandidate(withoutQuery.replace(/-preview[^/.]*\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+    addCandidate(withoutQuery.replace(/-social-preview\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+    addCandidate(withoutQuery.replace(/\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+  }
+
+  const clipUrl = clip.url || '';
+  if (clipUrl.includes('/clip/')) {
+    const slug = clipUrl.split('/clip/')[1]?.split(/[/?#]/)[0];
+    if (slug) {
+      addCandidate(`https://clips-media-assets2.twitch.tv/${slug}.mp4`);
+      addCandidate(`https://production.assets.clips.twitchcdn.net/${slug}.mp4`);
+    }
+  }
+
+  if (clipId) {
+    addCandidate(`https://clips-media-assets2.twitch.tv/${clipId}.mp4`);
+    addCandidate(`https://production.assets.clips.twitchcdn.net/${clipId}.mp4`);
+  }
+
+  return candidates.filter(Boolean);
+};
+
+export const fetchClipAccessToken = async (clipSlug) => {
+  const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
+  const token = await getAppAccessToken();
+
+  try {
+    const response = await fetch(`https://api.twitch.tv/api/clips/${encodeURIComponent(clipSlug)}/access_token`, {
+      headers: {
+        'Client-ID': clientId,
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json();
+    if (!payload?.sig || !payload?.token) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
 export const clearCachedToken = () => {
   cachedToken = null;
 };

@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildClipWindows, clearCachedToken, getAppAccessToken } from './twitchClient.js';
+import {
+  buildClipWindows,
+  clearCachedToken,
+  deriveClipMp4Candidates,
+  getAppAccessToken,
+} from './twitchClient.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -55,4 +60,27 @@ test('buildClipWindows splits range into windows', () => {
   assert.equal(windows.length, 2);
   assert.equal(windows[0].start.toISOString(), '2026-01-01T00:00:00.000Z');
   assert.equal(windows[1].end.toISOString(), '2026-03-01T00:00:00.000Z');
+});
+
+test('deriveClipMp4Candidates handles multiple Twitch thumbnail formats', () => {
+  const clip = {
+    thumbnail_url: 'https://clips-media-assets2.twitch.tv/AT-cm%7C123-preview-480x272.jpg',
+    url: 'https://www.twitch.tv/someone/clip/JollyLachrymosePeanutHassaanChop-mmGrRLjnDeIzcS17',
+  };
+
+  const candidates = deriveClipMp4Candidates(clip, 'JollyLachrymosePeanutHassaanChop-mmGrRLjnDeIzcS17');
+
+  assert.ok(candidates.some((url) => url.endsWith('AT-cm%7C123.mp4')));
+  assert.ok(candidates.some((url) => url.includes('JollyLachrymosePeanutHassaanChop-mmGrRLjnDeIzcS17.mp4')));
+});
+
+test('deriveClipMp4Candidates returns deterministic unique list', () => {
+  const clip = {
+    thumbnail_url: 'https://clips-media-assets2.twitch.tv/foo-preview.jpg?abc=1',
+  };
+
+  const candidates = deriveClipMp4Candidates(clip, 'foo');
+
+  assert.equal(candidates.length, new Set(candidates).size);
+  assert.ok(candidates[0].endsWith('.mp4'));
 });

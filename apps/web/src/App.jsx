@@ -102,6 +102,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('local');
 
   const [twitchChannel, setTwitchChannel] = useState('');
+  const [showAdvancedChannelLookup, setShowAdvancedChannelLookup] = useState(false);
   const [twitchLoading, setTwitchLoading] = useState(false);
   const [twitchError, setTwitchError] = useState(null);
   const [twitchData, setTwitchData] = useState(null);
@@ -158,6 +159,14 @@ function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'twitch' || !twitchUser || twitchLoading || twitchData) {
+      return;
+    }
+
+    handleFetchMyTwitch();
+  }, [activeTab, twitchUser]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -412,7 +421,7 @@ function App() {
 
   const handleFetchTwitch = async () => {
     if (!twitchChannel) {
-      setTwitchError('Enter a Twitch channel login to continue.');
+      setTwitchError('Enter a Twitch channel login for advanced lookup.');
       return;
     }
 
@@ -454,7 +463,20 @@ function App() {
       setActiveTab('local');
     } catch (err) {
       console.error('Failed to import clip:', err);
-      setTwitchError('Clip import failed. Please try again.');
+      let message = 'Clip import failed. Please try again.';
+      const blob = err.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const text = await blob.text();
+          const parsed = JSON.parse(text);
+          message = parsed.error || message;
+        } catch {
+          // keep default message
+        }
+      } else if (err.response?.data?.error) {
+        message = err.response.data.error;
+      }
+      setTwitchError(message);
     } finally {
       setClipImporting(null);
     }
@@ -706,16 +728,6 @@ function App() {
             )}
 
             <div className="twitch-form">
-              <div className="input-group">
-                <label>Twitch Channel Login</label>
-                <input
-                  type="text"
-                  value={twitchChannel}
-                  onChange={(e) => setTwitchChannel(e.target.value.trim())}
-                  placeholder="e.g. creatorname"
-                />
-              </div>
-
               <div className="input-group toggle-group">
                 <label>Clip Range</label>
                 <button
@@ -757,13 +769,38 @@ function App() {
               )}
             </div>
 
-            <button
-              className="process-btn"
-              onClick={handleFetchTwitch}
-              disabled={twitchLoading}
-            >
-              {twitchLoading ? 'Loading Twitch library...' : 'Load Twitch Videos'}
-            </button>
+            <div style={{ marginTop: '1rem' }}>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setShowAdvancedChannelLookup((prev) => !prev)}
+              >
+                {showAdvancedChannelLookup
+                  ? 'Hide advanced channel lookup'
+                  : (twitchUser ? 'Advanced: Load another channel' : 'Load by channel login (advanced)')}
+              </button>
+
+              {showAdvancedChannelLookup && (
+                <div style={{ marginTop: '1rem' }}>
+                  <div className="input-group" style={{ marginBottom: '1rem' }}>
+                    <label>Twitch Channel Login (advanced)</label>
+                    <input
+                      type="text"
+                      value={twitchChannel}
+                      onChange={(e) => setTwitchChannel(e.target.value.trim())}
+                      placeholder="e.g. creatorname"
+                    />
+                  </div>
+                  <button
+                    className="process-btn"
+                    onClick={handleFetchTwitch}
+                    disabled={twitchLoading}
+                  >
+                    {twitchLoading ? 'Loading Twitch library...' : 'Load Selected Channel'}
+                  </button>
+                </div>
+              )}
+            </div>
 
             {twitchError && (
               <div className="error-box" role="alert">
