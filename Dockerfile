@@ -44,12 +44,26 @@ RUN echo "server { \
     index index.html; \
     gzip on; \
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; \
+    location = /api/twitch/clip-download { \
+        proxy_pass http://localhost:3000; \
+        proxy_set_header Host \$host; \
+        proxy_set_header X-Real-IP \$remote_addr; \
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; \
+        proxy_set_header X-Forwarded-Proto \$scheme; \
+        proxy_connect_timeout 10s; \
+        proxy_send_timeout 120s; \
+        proxy_read_timeout 120s; \
+        proxy_buffering off; \
+    } \
     location /api/ { \
         proxy_pass http://localhost:3000; \
         proxy_set_header Host \$host; \
         proxy_set_header X-Real-IP \$remote_addr; \
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; \
         proxy_set_header X-Forwarded-Proto \$scheme; \
+        proxy_connect_timeout 10s; \
+        proxy_send_timeout 60s; \
+        proxy_read_timeout 60s; \
     } \
     location /health { \
         proxy_pass http://localhost:3000/health; \

@@ -355,9 +355,9 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     }
 
     const { response: clipResponse, resolvedUrl } = await probeClipMediaCandidates(attempts, {
-      timeoutMs: Number(process.env.TWITCH_CLIP_FETCH_TIMEOUT_MS || 8000),
-      retries: Number(process.env.TWITCH_CLIP_FETCH_RETRIES || 1),
-      maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 12),
+      timeoutMs: Number(process.env.TWITCH_CLIP_FETCH_TIMEOUT_MS || 2500),
+      retries: Number(process.env.TWITCH_CLIP_FETCH_RETRIES || 0),
+      maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 6),
     });
 
     if (!clipResponse) {
