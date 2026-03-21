@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor, screen } from '@testing-library/react';
 import App from '../App';
-import axios from 'axios';
+import apiClient from '../lib/apiClient';
 
-vi.mock('axios', () => ({
+vi.mock('../lib/apiClient', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
-    defaults: {},
   },
 }));
 
@@ -17,7 +16,7 @@ describe('Twitch auth driven library loading', () => {
   });
 
   it('auto-loads my Twitch library when authenticated and Twitch tab is selected', async () => {
-    axios.get
+    apiClient.get
       .mockResolvedValueOnce({
         data: {
           user: {
@@ -43,7 +42,7 @@ describe('Twitch auth driven library loading', () => {
     twitchTab.click();
 
     await waitFor(() => {
-      expect(axios.get).toHaveBeenCalledWith('/api/twitch/my-library', expect.any(Object));
+      expect(apiClient.get).toHaveBeenCalledWith('/api/twitch/my-library', expect.any(Object));
     });
   });
 });

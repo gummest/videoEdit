@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import apiClient from './lib/apiClient';
 import './App.css';
 
 // Configure axios to send credentials
-axios.defaults.withCredentials = true;
 
 const PRESETS = {
   quick30s: { label: 'Quick 30s (3s cuts)', totalLength: 30, cutDuration: 3 },
@@ -143,7 +142,7 @@ function App() {
   useEffect(() => {
     const checkTwitchAuth = async () => {
       try {
-        const response = await axios.get('/api/auth/twitch/me', {
+        const response = await apiClient.get('/api/auth/twitch/me', {
           withCredentials: true,
         });
         setTwitchUser(response.data.user);
@@ -350,7 +349,7 @@ function App() {
         controller.abort('processing-timeout');
       }, CLIENT_PROCESS_TIMEOUT_MS);
 
-      const response = await axios.post('/api/process', formData, {
+      const response = await apiClient.post('/api/process', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -462,12 +461,12 @@ function App() {
   };
 
   const handleTwitchLogin = () => {
-    window.location.href = '/api/auth/twitch/login?returnTo=twitch';
+    window.location.href = `${window.location.origin}/api/auth/twitch/login?returnTo=twitch`;
   };
   
   const handleTwitchLogout = async () => {
     try {
-      await axios.post('/api/auth/twitch/logout', {}, {
+      await apiClient.post('/api/auth/twitch/logout', {}, {
         withCredentials: true,
       });
       setTwitchUser(null);
@@ -484,7 +483,7 @@ function App() {
     setSelectedTwitch(null);
 
     try {
-      const response = await axios.get('/api/twitch/my-library', {
+      const response = await apiClient.get('/api/twitch/my-library', {
         params: {
           includeAllClips,
           pageSize: 100,
@@ -517,7 +516,7 @@ function App() {
     setSelectedTwitch(null);
 
     try {
-      const response = await axios.get('/api/twitch/library', {
+      const response = await apiClient.get('/api/twitch/library', {
         params: {
           login: twitchChannel,
           clipStart,
@@ -538,7 +537,7 @@ function App() {
     setClipImporting(clip.id);
     setTwitchError(null);
     try {
-      const response = await axios.get('/api/twitch/clip-download', {
+      const response = await apiClient.get('/api/twitch/clip-download', {
         params: { clipId: clip.id },
         responseType: 'blob',
       });
