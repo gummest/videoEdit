@@ -24,32 +24,36 @@ const buildFrontendRedirect = ({ twitchConnected = false, error = null, tab = 'l
 };
 
 // OAuth login redirect
-router.get('/twitch/login', async (req, res) => {
-  const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
-  const redirectUri = getRequiredEnv('TWITCH_REDIRECT_URI');
-  const returnTab = toSafeTab(req.query.returnTo);
-  const state = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+router.get('/twitch/login', async (req, res, next) => {
+  try {
+    const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
+    const redirectUri = getRequiredEnv('TWITCH_REDIRECT_URI');
+    const returnTab = toSafeTab(req.query.returnTo);
+    const state = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-  const scopes = [
-    'user:read:email',
-    'clips:edit',
-  ];
+    const scopes = [
+      'user:read:email',
+      'clips:edit',
+    ];
 
-  req.session.twitchOAuth = {
-    state,
-    returnTab,
-  };
-  await req.session.save();
+    req.session.twitchOAuth = {
+      state,
+      returnTab,
+    };
+    await req.session.save();
 
-  const authUrl = new URL(TWITCH_AUTH_URL);
-  authUrl.searchParams.set('client_id', clientId);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', scopes.join(' '));
-  authUrl.searchParams.set('force_verify', 'true');
-  authUrl.searchParams.set('state', state);
+    const authUrl = new URL(TWITCH_AUTH_URL);
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', scopes.join(' '));
+    authUrl.searchParams.set('force_verify', 'true');
+    authUrl.searchParams.set('state', state);
 
-  res.redirect(authUrl.toString());
+    res.redirect(authUrl.toString());
+  } catch (err) {
+    next(err);
+  }
 });
 
 // OAuth callback
