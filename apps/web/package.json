@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run src/lib/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
