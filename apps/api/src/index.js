@@ -372,11 +372,19 @@ app.get('/api/twitch/clip-download', async (req, res) => {
 
     for (const candidate of attempts) {
       const response = await fetch(candidate);
-      if (response.ok) {
-        clipResponse = response;
-        resolvedUrl = candidate;
-        break;
+      if (!response.ok) {
+        continue;
       }
+
+      const contentType = response.headers.get('content-type') || '';
+      const isVideo = contentType.includes('video/') || contentType.includes('application/octet-stream');
+      if (!isVideo) {
+        continue;
+      }
+
+      clipResponse = response;
+      resolvedUrl = candidate;
+      break;
     }
 
     if (!clipResponse) {

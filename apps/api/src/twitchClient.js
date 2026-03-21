@@ -149,6 +149,7 @@ export const deriveClipMp4Candidates = (clip = {}, clipId = '') => {
     if (!value) return;
     const trimmed = value.trim();
     if (!trimmed || seen.has(trimmed)) return;
+    if (!/\.mp4(?:\?|$)/i.test(trimmed)) return;
     seen.add(trimmed);
     candidates.push(trimmed);
   };

@@ -82,5 +82,5 @@ test('deriveClipMp4Candidates returns deterministic unique list', () => {
   const candidates = deriveClipMp4Candidates(clip, 'foo');
 
   assert.equal(candidates.length, new Set(candidates).size);
-  assert.ok(candidates[0].endsWith('.mp4'));
+  assert.ok(candidates.every((url) => url.includes('.mp4')));
 });
