@@ -184,6 +184,52 @@ export const deriveClipMp4Candidates = (clip = {}, clipId = '') => {
   return candidates.filter(Boolean);
 };
 
+export const fetchClipPlaybackSources = async (clipSlug) => {
+  const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
+
+  try {
+    const response = await fetch('https://gql.twitch.tv/gql', {
+      method: 'POST',
+      headers: {
+        'Client-ID': clientId,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `query GetClipPlayback($slug: ID!) {
+          clip(slug: $slug) {
+            videoQualities {
+              sourceURL
+              quality
+            }
+            playbackAccessToken(params: { platform: \"web\", playerBackend: \"mediaplayer\", playerType: \"site\" }) {
+              signature
+              value
+            }
+          }
+        }`,
+        variables: { slug: clipSlug },
+      }),
+    });
+
+    if (!response.ok) {
+      return { sources: [], accessToken: null };
+    }
+
+    const payload = await response.json();
+    const clip = payload?.data?.clip;
+    const sources = (clip?.videoQualities || [])
+      .map((item) => item?.sourceURL)
+      .filter((url) => typeof url === 'string' && url.includes('.mp4'));
+
+    return {
+      sources,
+      accessToken: clip?.playbackAccessToken || null,
+    };
+  } catch {
+    return { sources: [], accessToken: null };
+  }
+};
+
 export const fetchClipAccessToken = async (clipSlug) => {
   const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
   const token = await getAppAccessToken();

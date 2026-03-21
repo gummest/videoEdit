@@ -10,6 +10,7 @@ import {
   fetchAllVideos,
   fetchClipAccessToken,
   fetchClipById,
+  fetchClipPlaybackSources,
   fetchUserByLogin,
   deriveClipMp4Candidates,
 } from './twitchClient.js';
@@ -347,10 +348,13 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     const clip = await fetchClipById(clipId);
     const candidateUrls = deriveClipMp4Candidates(clip, clipId);
 
+    const playback = await fetchClipPlaybackSources(clipId);
+    const playbackCandidates = playback.sources || [];
+
     let signedCandidates = [];
     const accessToken = await fetchClipAccessToken(clipId);
     if (accessToken) {
-      const signed = candidateUrls.map((url) => {
+      const signed = [...playbackCandidates, ...candidateUrls].map((url) => {
         const separator = url.includes('?') ? '&' : '?';
         return `${url}${separator}sig=${encodeURIComponent(accessToken.sig)}&token=${encodeURIComponent(accessToken.token)}`;
       });
@@ -359,7 +363,7 @@ app.get('/api/twitch/clip-download', async (req, res) => {
       signedCandidates = signed;
     }
 
-    const attempts = [...signedCandidates, ...candidateUrls];
+    const attempts = [...signedCandidates, ...playbackCandidates, ...candidateUrls];
 
     if (!attempts.length) {
       return res.status(422).json({

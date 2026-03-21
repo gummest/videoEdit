@@ -4,6 +4,7 @@ import {
   buildClipWindows,
   clearCachedToken,
   deriveClipMp4Candidates,
+  fetchClipPlaybackSources,
   getAppAccessToken,
 } from './twitchClient.js';
 
@@ -83,4 +84,29 @@ test('deriveClipMp4Candidates returns deterministic unique list', () => {
 
   assert.equal(candidates.length, new Set(candidates).size);
   assert.ok(candidates.every((url) => url.includes('.mp4')));
+});
+
+test('fetchClipPlaybackSources extracts mp4 sources from Twitch GQL', async () => {
+  process.env.TWITCH_CLIENT_ID = 'test-client-id';
+
+  mockFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      data: {
+        clip: {
+          videoQualities: [
+            { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video.mp4' },
+            { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video-720.mp4' },
+          ],
+          playbackAccessToken: { signature: 'sig', value: 'token' },
+        },
+      },
+    }),
+  }));
+
+  const result = await fetchClipPlaybackSources('slug');
+  assert.equal(result.sources.length, 2);
+  assert.equal(result.accessToken.signature, 'sig');
+
+  restoreFetch();
 });
