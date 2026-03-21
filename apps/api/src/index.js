@@ -14,6 +14,8 @@ import {
   fetchUserByLogin,
   deriveClipMp4Candidates,
   probeClipMediaCandidates,
+  buildSignedClipCandidates,
+  extractClipUriCandidatesFromAccessTokenValue,
 } from './twitchClient.js';
 import authRoutes, { requireTwitchAuth } from './authRoutes.js';
 import path from 'path';
@@ -340,23 +342,38 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     const clip = await fetchClipById(clipId);
     mark('clip-metadata-ready');
 
-    const candidateUrls = deriveClipMp4Candidates(clip, clipId);
+    const metadataCandidates = deriveClipMp4Candidates(clip, clipId);
 
     const playback = await fetchClipPlaybackSources(clipId);
     const playbackCandidates = playback.sources || [];
+    const playlistCandidates = playback.playlistSources || [];
+    const tokenUriCandidates = extractClipUriCandidatesFromAccessTokenValue(playback.accessToken?.value);
     mark('playback-sources-ready');
 
-    let signedCandidates = [];
-    const accessToken = await fetchClipAccessToken(clipId);
-    if (accessToken) {
-      signedCandidates = [...playbackCandidates, ...candidateUrls].map((url) => {
-        const separator = url.includes('?') ? '&' : '?';
-        return `${url}${separator}sig=${encodeURIComponent(accessToken.sig)}&token=${encodeURIComponent(accessToken.token)}`;
-      });
-    }
+    // Legacy endpoint fallback (can fail on modern clip delivery; keep as backup only).
+    const legacyAccessToken = await fetchClipAccessToken(clipId);
     mark('access-token-ready');
 
-    const attempts = [...signedCandidates, ...playbackCandidates, ...candidateUrls];
+    const signedFromPlaybackToken = buildSignedClipCandidates(
+      [...playbackCandidates, ...tokenUriCandidates, ...metadataCandidates],
+      playback.accessToken
+    );
+
+    const signedFromLegacyToken = legacyAccessToken
+      ? [...playbackCandidates, ...tokenUriCandidates, ...metadataCandidates].map((url) => {
+          const separator = url.includes('?') ? '&' : '?';
+          return `${url}${separator}sig=${encodeURIComponent(legacyAccessToken.sig)}&token=${encodeURIComponent(legacyAccessToken.token)}`;
+        })
+      : [];
+
+    const attempts = [
+      ...signedFromPlaybackToken,
+      ...playbackCandidates,
+      ...tokenUriCandidates,
+      ...playlistCandidates,
+      ...signedFromLegacyToken,
+      ...metadataCandidates,
+    ];
 
     if (!attempts.length) {
       return res.status(422).json({
@@ -368,7 +385,7 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     const { response: clipResponse, resolvedUrl } = await probeClipMediaCandidates(attempts, {
       timeoutMs: Number(process.env.TWITCH_CLIP_FETCH_TIMEOUT_MS || 2500),
       retries: Number(process.env.TWITCH_CLIP_FETCH_RETRIES || 0),
-      maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 6),
+      maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 16),
     });
     mark('media-probe-finished');
 

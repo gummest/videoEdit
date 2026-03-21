@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildClipWindows,
+  buildSignedClipCandidates,
   clearCachedToken,
   deriveClipMp4Candidates,
+  extractClipUriCandidatesFromAccessTokenValue,
   fetchClipPlaybackSources,
   getAppAccessToken,
   probeClipMediaCandidates,
@@ -76,6 +78,17 @@ test('deriveClipMp4Candidates handles multiple Twitch thumbnail formats', () => 
   assert.ok(candidates.some((url) => url.includes('JollyLachrymosePeanutHassaanChop-mmGrRLjnDeIzcS17.mp4')));
 });
 
+test('deriveClipMp4Candidates includes VOD offset based candidate', () => {
+  const clip = {
+    thumbnail_url: 'https://static-cdn.jtvnw.net/twitch-clips/abc123/vod-1862442605-offset-6160-preview-480x272.jpg',
+    video_id: '1862442605',
+    vod_offset: 6160,
+  };
+
+  const candidates = deriveClipMp4Candidates(clip, 'clipSlug');
+  assert.ok(candidates.includes('https://production.assets.clips.twitchcdn.net/abc123/vod-1862442605-offset-6160.mp4'));
+});
+
 test('deriveClipMp4Candidates returns deterministic unique list', () => {
   const clip = {
     thumbnail_url: 'https://clips-media-assets2.twitch.tv/foo-preview.jpg?abc=1',
@@ -87,29 +100,53 @@ test('deriveClipMp4Candidates returns deterministic unique list', () => {
   assert.ok(candidates.every((url) => url.includes('.mp4')));
 });
 
-test('fetchClipPlaybackSources extracts mp4 sources from Twitch GQL', async () => {
-  process.env.TWITCH_CLIENT_ID = 'test-client-id';
+test('fetchClipPlaybackSources falls back to public gql client id and extracts mp4', async () => {
+  process.env.TWITCH_GQL_CLIENT_ID = 'bad-client';
+  let callCount = 0;
 
-  mockFetch(async () => ({
-    ok: true,
-    json: async () => ({
-      data: {
-        clip: {
-          videoQualities: [
-            { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video.mp4' },
-            { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video-720.mp4' },
-          ],
-          playbackAccessToken: { signature: 'sig', value: 'token' },
+  mockFetch(async (url, options) => {
+    callCount += 1;
+    const clientId = options?.headers?.['Client-ID'];
+    if (clientId === 'bad-client') {
+      return { ok: false, status: 400, json: async () => ({}) };
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          clip: {
+            videoQualities: [
+              { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video.mp4' },
+              { sourceURL: 'https://production.assets.clips.twitchcdn.net/v2/media/slug/video-720.mp4' },
+            ],
+            playbackAccessToken: { signature: 'sig', value: '{"clip_uri":"https://foo/bar.mp4"}' },
+          },
         },
-      },
-    }),
-  }));
+      }),
+    };
+  });
 
   const result = await fetchClipPlaybackSources('slug');
   assert.equal(result.sources.length, 2);
   assert.equal(result.accessToken.signature, 'sig');
+  assert.ok(callCount >= 2);
 
+  delete process.env.TWITCH_GQL_CLIENT_ID;
   restoreFetch();
+});
+
+test('extractClipUriCandidatesFromAccessTokenValue returns clip_uri candidate', () => {
+  const tokenValue = JSON.stringify({ clip_uri: 'https://production.assets.clips.twitchcdn.net/foo.mp4' });
+  const result = extractClipUriCandidatesFromAccessTokenValue(tokenValue);
+  assert.deepEqual(result, ['https://production.assets.clips.twitchcdn.net/foo.mp4']);
+});
+
+test('buildSignedClipCandidates appends signature and token', () => {
+  const signed = buildSignedClipCandidates(['https://foo/video.mp4'], { signature: 'sig', value: 'tokenValue' });
+  assert.equal(signed.length, 1);
+  assert.ok(signed[0].includes('sig=sig'));
+  assert.ok(signed[0].includes('token=tokenValue'));
 });
 
 test('probeClipMediaCandidates retries and resolves first valid video source', async () => {
@@ -134,6 +171,37 @@ test('probeClipMediaCandidates retries and resolves first valid video source', a
   assert.equal(result.resolvedUrl, 'https://example.com/a.mp4');
   assert.ok(result.response);
   assert.equal(calls, 2);
+
+  restoreFetch();
+});
+
+test('probeClipMediaCandidates can resolve m3u8 playlist to media segment', async () => {
+  let call = 0;
+  mockFetch(async (url) => {
+    call += 1;
+    if (url.includes('.m3u8')) {
+      return {
+        ok: true,
+        headers: { get: () => 'application/vnd.apple.mpegurl' },
+        text: async () => '#EXTM3U\n#EXTINF:1.0,\nsegment.ts\n',
+      };
+    }
+
+    return {
+      ok: true,
+      headers: { get: () => 'video/mp2t' },
+    };
+  });
+
+  const result = await probeClipMediaCandidates(['https://cdn.test/video.m3u8'], {
+    timeoutMs: 200,
+    retries: 0,
+    maxAttempts: 1,
+  });
+
+  assert.ok(result.response);
+  assert.equal(result.resolvedUrl, 'https://cdn.test/segment.ts');
+  assert.equal(call, 2);
 
   restoreFetch();
 });

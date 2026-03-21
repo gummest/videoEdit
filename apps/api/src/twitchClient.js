@@ -1,5 +1,7 @@
 const TWITCH_AUTH_URL = 'https://id.twitch.tv/oauth2/token';
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix';
+const TWITCH_GQL_URL = 'https://gql.twitch.tv/gql';
+const TWITCH_PUBLIC_GQL_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 
 let cachedToken = null;
 
@@ -18,6 +20,63 @@ const fetchJson = async (url, options = {}) => {
     throw new Error(message || `Request failed with status ${response.status}`);
   }
   return response.json();
+};
+
+const dedupeStrings = (values = []) => {
+  const seen = new Set();
+  const output = [];
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
+};
+
+const tryJsonParse = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const chooseBestMp4 = (urls = []) => {
+  const ranked = dedupeStrings(urls).map((url) => {
+    const qualityMatch = url.match(/(?:-|_)(\d{3,4})(?:p)?\.mp4/i) || url.match(/quality=(\d{3,4})/i);
+    const score = qualityMatch ? Number.parseInt(qualityMatch[1], 10) : 0;
+    return { url, score: Number.isFinite(score) ? score : 0 };
+  });
+
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.map((entry) => entry.url);
+};
+
+const buildClipThumbnails = (thumbnailUrl = '') => {
+  if (!thumbnailUrl) return [];
+
+  const clean = thumbnailUrl.trim();
+  if (!clean) return [];
+
+  const withoutQuery = clean.split('?')[0];
+  const variants = [withoutQuery];
+
+  // Common Twitch preview layouts
+  variants.push(withoutQuery.replace(/-preview[^/.]*\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+  variants.push(withoutQuery.replace(/-social-preview\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+  variants.push(withoutQuery.replace(/\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+
+  // Sometimes thumbnail_url can include static-cdn host while media is on production.assets
+  variants.push(
+    withoutQuery
+      .replace('https://static-cdn.jtvnw.net/twitch-clips/', 'https://production.assets.clips.twitchcdn.net/')
+      .replace(/-preview[^/.]*\.(?:jpg|jpeg|png|webp)$/i, '.mp4')
+  );
+
+  return dedupeStrings(variants).filter((value) => /\.mp4(?:\?|$)/i.test(value));
 };
 
 export const getAppAccessToken = async () => {
@@ -144,90 +203,104 @@ export const fetchClipById = async (clipId) => {
 
 export const deriveClipMp4Candidates = (clip = {}, clipId = '') => {
   const candidates = [];
-  const seen = new Set();
-  const addCandidate = (value) => {
-    if (!value) return;
+  const add = (value) => {
+    if (!value || typeof value !== 'string') return;
     const trimmed = value.trim();
-    if (!trimmed || seen.has(trimmed)) return;
-    if (!/\.mp4(?:\?|$)/i.test(trimmed)) return;
-    seen.add(trimmed);
+    if (!trimmed || !/\.mp4(?:\?|$)/i.test(trimmed)) return;
     candidates.push(trimmed);
   };
 
-  const thumbnailUrl = clip.thumbnail_url || '';
-  if (thumbnailUrl) {
-    const withoutQuery = thumbnailUrl.split('?')[0];
-
-    // Common Twitch preview formats:
-    //  - ...-preview-480x272.jpg
-    //  - ...-social-preview.jpg
-    //  - ...-preview.jpg / .png / .jpeg / .webp
-    addCandidate(withoutQuery.replace(/-preview[^/.]*\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
-    addCandidate(withoutQuery.replace(/-social-preview\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
-    addCandidate(withoutQuery.replace(/\.(?:jpg|jpeg|png|webp)$/i, '.mp4'));
+  for (const value of buildClipThumbnails(clip.thumbnail_url || '')) {
+    add(value);
   }
 
   const clipUrl = clip.url || '';
   if (clipUrl.includes('/clip/')) {
     const slug = clipUrl.split('/clip/')[1]?.split(/[/?#]/)[0];
     if (slug) {
-      addCandidate(`https://clips-media-assets2.twitch.tv/${slug}.mp4`);
-      addCandidate(`https://production.assets.clips.twitchcdn.net/${slug}.mp4`);
+      add(`https://clips-media-assets2.twitch.tv/${slug}.mp4`);
+      add(`https://production.assets.clips.twitchcdn.net/${slug}.mp4`);
     }
+  }
+
+  // Important for clips with VOD-based URLs.
+  const thumbPathMatch = (clip.thumbnail_url || '').match(/\/twitch-clips\/([^/]+)\//i);
+  const thumbAssetKey = thumbPathMatch?.[1];
+  const vodOffset = clip.vod_offset;
+  const videoId = clip.video_id;
+  if (thumbAssetKey && videoId && Number.isFinite(vodOffset)) {
+    add(`https://production.assets.clips.twitchcdn.net/${thumbAssetKey}/vod-${videoId}-offset-${vodOffset}.mp4`);
   }
 
   if (clipId) {
-    addCandidate(`https://clips-media-assets2.twitch.tv/${clipId}.mp4`);
-    addCandidate(`https://production.assets.clips.twitchcdn.net/${clipId}.mp4`);
+    add(`https://clips-media-assets2.twitch.tv/${clipId}.mp4`);
+    add(`https://production.assets.clips.twitchcdn.net/${clipId}.mp4`);
   }
 
-  return candidates.filter(Boolean);
+  return chooseBestMp4(dedupeStrings(candidates));
+};
+
+const fetchClipPlaybackSourcesViaGql = async (clipSlug, gqlClientId) => {
+  const response = await fetchWithTimeout(TWITCH_GQL_URL, {
+    method: 'POST',
+    headers: {
+      'Client-ID': gqlClientId,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: `query GetClipPlayback($slug: ID!) {
+        clip(slug: $slug) {
+          videoQualities {
+            sourceURL
+            quality
+          }
+          playbackAccessToken(params: { platform: "web", playerBackend: "mediaplayer", playerType: "site" }) {
+            signature
+            value
+          }
+        }
+      }`,
+      variables: { slug: clipSlug },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GQL request failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const clip = payload?.data?.clip;
+  const allSources = (clip?.videoQualities || [])
+    .map((item) => item?.sourceURL)
+    .filter((url) => typeof url === 'string' && url.length > 0);
+
+  const sources = chooseBestMp4(allSources.filter((url) => /\.mp4(?:\?|$)/i.test(url)));
+  const playlistSources = dedupeStrings(allSources.filter((url) => /\.m3u8(?:\?|$)/i.test(url)));
+
+  return {
+    sources,
+    playlistSources,
+    accessToken: clip?.playbackAccessToken || null,
+  };
 };
 
 export const fetchClipPlaybackSources = async (clipSlug) => {
-  const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
+  const configured = process.env.TWITCH_GQL_CLIENT_ID || '';
+  const appClientId = process.env.TWITCH_CLIENT_ID || '';
+  const clientIds = dedupeStrings([configured, TWITCH_PUBLIC_GQL_CLIENT_ID, appClientId]);
 
-  try {
-    const response = await fetchWithTimeout('https://gql.twitch.tv/gql', {
-      method: 'POST',
-      headers: {
-        'Client-ID': clientId,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `query GetClipPlayback($slug: ID!) {
-          clip(slug: $slug) {
-            videoQualities {
-              sourceURL
-              quality
-            }
-            playbackAccessToken(params: { platform: \"web\", playerBackend: \"mediaplayer\", playerType: \"site\" }) {
-              signature
-              value
-            }
-          }
-        }`,
-        variables: { slug: clipSlug },
-      }),
-    });
-
-    if (!response.ok) {
-      return { sources: [], accessToken: null };
+  for (const clientId of clientIds) {
+    try {
+      const result = await fetchClipPlaybackSourcesViaGql(clipSlug, clientId);
+      if (result.sources.length || result.playlistSources.length || result.accessToken) {
+        return result;
+      }
+    } catch {
+      // Try next Client-ID fallback.
     }
-
-    const payload = await response.json();
-    const clip = payload?.data?.clip;
-    const sources = (clip?.videoQualities || [])
-      .map((item) => item?.sourceURL)
-      .filter((url) => typeof url === 'string' && url.includes('.mp4'));
-
-    return {
-      sources,
-      accessToken: clip?.playbackAccessToken || null,
-    };
-  } catch {
-    return { sources: [], accessToken: null };
   }
+
+  return { sources: [], playlistSources: [], accessToken: null };
 };
 
 export const fetchClipAccessToken = async (clipSlug) => {
@@ -278,6 +351,57 @@ const isRetryableFetchError = (error) => {
   return name === 'AbortError' || name === 'TypeError';
 };
 
+const parseM3u8ToBestMediaUrl = (playlistText = '', baseUrl = '') => {
+  const lines = playlistText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  // Variant playlist (#EXT-X-STREAM-INF then URL line)
+  const variants = [];
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    const line = lines[i];
+    if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
+    const next = lines[i + 1];
+    if (!next || next.startsWith('#')) continue;
+
+    const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
+    const bandwidth = bwMatch ? Number.parseInt(bwMatch[1], 10) : 0;
+    variants.push({
+      url: new URL(next, baseUrl).toString(),
+      bandwidth: Number.isFinite(bandwidth) ? bandwidth : 0,
+    });
+  }
+
+  if (variants.length > 0) {
+    variants.sort((a, b) => b.bandwidth - a.bandwidth);
+    return variants[0].url;
+  }
+
+  // Media playlist segments
+  for (const line of lines) {
+    if (line.startsWith('#')) continue;
+    return new URL(line, baseUrl).toString();
+  }
+
+  return null;
+};
+
+const resolveM3u8Candidate = async (candidate, timeoutMs) => {
+  const response = await fetchWithTimeout(candidate, {}, timeoutMs);
+  if (!response.ok) return null;
+
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  const text = await response.text();
+
+  // Support both proper m3u8 and text/plain playlist responses.
+  if (!contentType.includes('mpegurl') && !text.includes('#EXTM3U')) {
+    return null;
+  }
+
+  return parseM3u8ToBestMediaUrl(text, candidate);
+};
+
 export const probeClipMediaCandidates = async (
   candidates = [],
   {
@@ -286,12 +410,23 @@ export const probeClipMediaCandidates = async (
     maxAttempts = 12,
   } = {}
 ) => {
-  const attempts = candidates.filter(Boolean).slice(0, maxAttempts);
+  const attempts = dedupeStrings(candidates).slice(0, maxAttempts);
 
   for (const candidate of attempts) {
     let attempt = 0;
     while (attempt <= retries) {
       try {
+        if (/\.m3u8(?:\?|$)/i.test(candidate)) {
+          const resolvedFromPlaylist = await resolveM3u8Candidate(candidate, timeoutMs);
+          if (resolvedFromPlaylist) {
+            const mediaResponse = await fetchWithTimeout(resolvedFromPlaylist, {}, timeoutMs);
+            if (mediaResponse.ok) {
+              return { response: mediaResponse, resolvedUrl: resolvedFromPlaylist };
+            }
+          }
+          break;
+        }
+
         const response = await fetchWithTimeout(candidate, {}, timeoutMs);
         if (!response.ok) {
           break;
@@ -299,7 +434,9 @@ export const probeClipMediaCandidates = async (
 
         const contentType = response.headers.get('content-type') || '';
         const isVideo =
-          contentType.includes('video/') || contentType.includes('application/octet-stream');
+          contentType.includes('video/') ||
+          contentType.includes('application/octet-stream') ||
+          contentType.includes('binary/octet-stream');
 
         if (!isVideo) {
           break;
@@ -316,6 +453,29 @@ export const probeClipMediaCandidates = async (
   }
 
   return { response: null, resolvedUrl: null };
+};
+
+export const buildSignedClipCandidates = (baseUrls = [], accessToken = null) => {
+  if (!accessToken?.signature || !accessToken?.value) return [];
+
+  return dedupeStrings(baseUrls).map((url) => {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}sig=${encodeURIComponent(accessToken.signature)}&token=${encodeURIComponent(accessToken.value)}`;
+  });
+};
+
+export const extractClipUriCandidatesFromAccessTokenValue = (accessTokenValue) => {
+  const parsed = tryJsonParse(accessTokenValue);
+  const clipUri = parsed?.clip_uri;
+  if (!clipUri || typeof clipUri !== 'string') return [];
+
+  const candidates = [clipUri];
+  // Some payloads include source URL and playback endpoints in other fields.
+  for (const key of ['sourceURL', 'source_url', 'url']) {
+    if (typeof parsed[key] === 'string') candidates.push(parsed[key]);
+  }
+
+  return dedupeStrings(candidates);
 };
 
 export const clearCachedToken = () => {
