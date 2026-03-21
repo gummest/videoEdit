@@ -1,6 +1,5 @@
-import { describe, it, expect } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { processVideo } from './videoProcessor.js';
 
 describe('videoProcessor', () => {
   describe('processVideo', () => {

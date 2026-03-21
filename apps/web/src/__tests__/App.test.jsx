@@ -188,7 +188,7 @@ describe('File Upload Functionality', () => {
     const user = userEvent.setup();
     render(<App />);
     
-    const uploadZone = screen.getByRole('button');
+    const _unused = screen.getByRole('button');
     const fileInput = screen.getByLabelText(/Upload video file/i);
     
     const clickSpy = vi.spyOn(fileInput, 'click');

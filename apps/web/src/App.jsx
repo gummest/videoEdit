@@ -128,7 +128,7 @@ function App() {
           withCredentials: true,
         });
         setTwitchUser(response.data.user);
-      } catch (err) {
+      } catch {
         // Not authenticated, that's okay
         setTwitchUser(null);
       } finally {

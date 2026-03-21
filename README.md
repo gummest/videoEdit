@@ -10,7 +10,9 @@ A full-stack video editing platform with Twitch integration. Upload local videos
 - Max file size: 2GB (configurable)
 - Real-time video preview and metadata extraction
 
-### 📺 Twitch Integration
+### 📺 Twitch Integration (URL Import + OAuth)
+- Import clips directly via Twitch URL (clips and VODs)
+- OAuth login flow (redirect URL: https://edit.mesutapps.online/api/auth/twitch/callback)
 - Browse any Twitch channel's VODs and clips
 - Search by channel login
 - Filter clips by date range or fetch all-time
@@ -67,13 +69,19 @@ cd apps/web && npm install
 
 ### Configuration
 
-Create `apps/api/.env`:
+Copy the example env file and fill in your credentials:
+
+```bash
+cp apps/api/.env.example apps/api/.env
+```
+
+Edit `apps/api/.env`:
 
 ```env
 # Twitch API (required for Twitch features)
-TWITCH_CLIENT_ID=your_client_id
-TWITCH_CLIENT_SECRET=your_client_secret
-TWITCH_REDIRECT_URI=https://yourdomain.com/api/auth/twitch/callback
+TWITCH_CLIENT_ID=your_twitch_client_id_here
+TWITCH_CLIENT_SECRET=your_twitch_client_secret_here
+TWITCH_REDIRECT_URI=https://edit.mesutapps.online/api/auth/twitch/callback
 
 # Server
 PORT=3001
