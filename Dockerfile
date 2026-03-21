@@ -59,10 +59,7 @@ RUN echo 'server { \
 }' > /etc/nginx/http.d/default.conf
 
 # Start API, then nginx (using exec form to be PID 1)
-RUN echo '#!/bin/sh\n\
-node /app/apps/api/src/index.js &\n\
-sleep 2\n\
-exec nginx -g "daemon off;"' > /start.sh && chmod +x /start.sh
+RUN printf '#!/bin/sh\nnode /app/apps/api/src/index.js &\nsleep 2\nexec nginx -g "daemon off;"\n' > /start.sh && chmod +x /start.sh
 
 EXPOSE 80
 
