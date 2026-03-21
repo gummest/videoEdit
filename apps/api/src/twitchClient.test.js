@@ -6,6 +6,7 @@ import {
   deriveClipMp4Candidates,
   fetchClipPlaybackSources,
   getAppAccessToken,
+  probeClipMediaCandidates,
 } from './twitchClient.js';
 
 const originalFetch = globalThis.fetch;
@@ -107,6 +108,49 @@ test('fetchClipPlaybackSources extracts mp4 sources from Twitch GQL', async () =
   const result = await fetchClipPlaybackSources('slug');
   assert.equal(result.sources.length, 2);
   assert.equal(result.accessToken.signature, 'sig');
+
+  restoreFetch();
+});
+
+test('probeClipMediaCandidates retries and resolves first valid video source', async () => {
+  let calls = 0;
+  mockFetch(async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw new TypeError('network down');
+    }
+    return {
+      ok: true,
+      headers: { get: () => 'video/mp4' },
+    };
+  });
+
+  const result = await probeClipMediaCandidates(['https://example.com/a.mp4'], {
+    timeoutMs: 200,
+    retries: 1,
+    maxAttempts: 1,
+  });
+
+  assert.equal(result.resolvedUrl, 'https://example.com/a.mp4');
+  assert.ok(result.response);
+  assert.equal(calls, 2);
+
+  restoreFetch();
+});
+
+test('probeClipMediaCandidates returns null response after exhausted attempts', async () => {
+  mockFetch(async () => {
+    throw new TypeError('timeout');
+  });
+
+  const result = await probeClipMediaCandidates(['https://example.com/a.mp4'], {
+    timeoutMs: 50,
+    retries: 0,
+    maxAttempts: 1,
+  });
+
+  assert.equal(result.response, null);
+  assert.equal(result.resolvedUrl, null);
 
   restoreFetch();
 });

@@ -13,18 +13,26 @@ import {
   fetchClipPlaybackSources,
   fetchUserByLogin,
   deriveClipMp4Candidates,
+  probeClipMediaCandidates,
 } from './twitchClient.js';
-import authRoutes, { requireTwitchAuth, userTwitchFetch } from './authRoutes.js';
+import authRoutes, { requireTwitchAuth } from './authRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { Readable } from 'stream';
+import { randomUUID } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use((req, res, next) => {
+  req.requestId = req.headers['x-request-id'] || randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Required when running behind HTTPS reverse proxy (Coolify/Nginx/Cloudflare)
@@ -210,67 +218,36 @@ app.get('/api/twitch/my-library', requireTwitchAuth, async (req, res) => {
   try {
     const { user } = req.session.twitchAuth;
     const { includeAllClips } = req.query;
-    
+
     const includeAll = includeAllClips !== 'false';
+    const resolvedUser = await fetchUserByLogin(user.login);
+
     const clipStartDate = includeAll
-      ? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+      ? new Date(resolvedUser.created_at || Date.now() - 365 * 24 * 60 * 60 * 1000)
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const clipEndDate = new Date();
-    
-    // Fetch videos
-    const fetchAllUserVideos = async (userId) => {
-      const items = [];
-      let cursor = null;
-      
-      do {
-        const pageParams = {
-          user_id: userId,
-          type: 'archive',
-          first: 100,
-          ...(cursor ? { after: cursor } : {}),
-        };
-        
-        const data = await userTwitchFetch(req.session, '/videos', pageParams);
-        items.push(...(data.data || []));
-        cursor = data.pagination?.cursor;
-      } while (cursor);
-      
-      return items;
-    };
-    
-    // Fetch clips
-    const fetchAllUserClips = async (userId, startDate, endDate) => {
-      const items = [];
-      let cursor = null;
-      
-      do {
-        const pageParams = {
-          broadcaster_id: userId,
-          started_at: startDate.toISOString(),
-          ended_at: endDate.toISOString(),
-          first: 100,
-          ...(cursor ? { after: cursor } : {}),
-        };
-        
-        const data = await userTwitchFetch(req.session, '/clips', pageParams);
-        items.push(...(data.data || []));
-        cursor = data.pagination?.cursor;
-      } while (cursor);
-      
-      return items;
-    };
-    
+
     const [vods, clips] = await Promise.all([
-      fetchAllUserVideos(user.id),
+      fetchAllVideos(resolvedUser.id),
       includeAll
-        ? fetchAllUserClips(user.id, clipStartDate, clipEndDate)
-        : fetchAllUserClips(user.id, clipStartDate, clipEndDate),
+        ? fetchAllClipsAllTime(resolvedUser.id, resolvedUser.created_at)
+        : fetchAllClips(resolvedUser.id, clipStartDate.toISOString(), clipEndDate.toISOString()),
     ]);
-    
+
     return res.json({
-      broadcaster: user,
+      broadcaster: {
+        id: resolvedUser.id,
+        login: resolvedUser.login,
+        displayName: resolvedUser.display_name,
+        profileImageUrl: resolvedUser.profile_image_url,
+      },
       vods,
       clips,
+      counts: {
+        vods: vods.length,
+        clips: clips.length,
+        total: vods.length + clips.length,
+      },
       clipWindow: {
         start: clipStartDate.toISOString(),
         end: clipEndDate.toISOString(),
@@ -281,6 +258,7 @@ app.get('/api/twitch/my-library', requireTwitchAuth, async (req, res) => {
     console.error('Twitch my-library error:', error.message);
     return res.status(500).json({
       error: 'Failed to load your Twitch library. Please try logging in again.',
+      requestId: req.requestId,
     });
   }
 });
@@ -324,6 +302,11 @@ app.get('/api/twitch/library', async (req, res) => {
       },
       vods,
       clips,
+      counts: {
+        vods: vods.length,
+        clips: clips.length,
+        total: vods.length + clips.length,
+      },
       clipWindow: {
         start: clipStartDate.toISOString(),
         end: clipEndDate.toISOString(),
@@ -339,10 +322,12 @@ app.get('/api/twitch/library', async (req, res) => {
 });
 
 app.get('/api/twitch/clip-download', async (req, res) => {
+  const requestId = req.requestId;
+
   try {
     const { clipId } = req.query;
     if (!clipId) {
-      return res.status(400).json({ error: 'Missing clipId.' });
+      return res.status(400).json({ error: 'Missing clipId.', requestId });
     }
 
     const clip = await fetchClipById(clipId);
@@ -354,13 +339,10 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     let signedCandidates = [];
     const accessToken = await fetchClipAccessToken(clipId);
     if (accessToken) {
-      const signed = [...playbackCandidates, ...candidateUrls].map((url) => {
+      signedCandidates = [...playbackCandidates, ...candidateUrls].map((url) => {
         const separator = url.includes('?') ? '&' : '?';
         return `${url}${separator}sig=${encodeURIComponent(accessToken.sig)}&token=${encodeURIComponent(accessToken.token)}`;
       });
-
-      // Try signed URLs first when available.
-      signedCandidates = signed;
     }
 
     const attempts = [...signedCandidates, ...playbackCandidates, ...candidateUrls];
@@ -368,32 +350,20 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     if (!attempts.length) {
       return res.status(422).json({
         error: 'Could not derive candidate media URLs from Twitch clip metadata.',
+        requestId,
       });
     }
 
-    let clipResponse = null;
-    let resolvedUrl = null;
-
-    for (const candidate of attempts) {
-      const response = await fetch(candidate);
-      if (!response.ok) {
-        continue;
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      const isVideo = contentType.includes('video/') || contentType.includes('application/octet-stream');
-      if (!isVideo) {
-        continue;
-      }
-
-      clipResponse = response;
-      resolvedUrl = candidate;
-      break;
-    }
+    const { response: clipResponse, resolvedUrl } = await probeClipMediaCandidates(attempts, {
+      timeoutMs: Number(process.env.TWITCH_CLIP_FETCH_TIMEOUT_MS || 8000),
+      retries: Number(process.env.TWITCH_CLIP_FETCH_RETRIES || 1),
+      maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 12),
+    });
 
     if (!clipResponse) {
-      return res.status(502).json({
+      return res.status(504).json({
         error: 'Failed to fetch Twitch clip media from all known URL patterns.',
+        requestId,
       });
     }
 
@@ -405,11 +375,20 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     }
 
     const stream = Readable.fromWeb(clipResponse.body);
+    stream.on('error', (streamError) => {
+      console.error('Clip stream error:', streamError.message, { requestId });
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Clip stream interrupted.', requestId });
+      } else {
+        res.destroy(streamError);
+      }
+    });
     stream.pipe(res);
   } catch (error) {
-    console.error('Twitch clip download error:', error.message);
+    console.error('Twitch clip download error:', error.message, { requestId });
     return res.status(500).json({
       error: `Failed to import Twitch clip: ${error.message}`,
+      requestId,
     });
   }
 });

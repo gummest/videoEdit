@@ -402,6 +402,7 @@ function App() {
       const response = await axios.get('/api/twitch/my-library', {
         params: {
           includeAllClips,
+          pageSize: 100,
         },
         withCredentials: true,
       });
@@ -815,8 +816,9 @@ function App() {
                     <h3>{twitchData.broadcaster?.displayName}</h3>
                     <p>@{twitchData.broadcaster?.login}</p>
                     <div className="twitch-meta">
-                      <span>{twitchData.vods?.length || 0} VODs</span>
-                      <span>{twitchData.clips?.length || 0} Clips</span>
+                      <span>{(twitchData.counts?.vods ?? twitchData.vods?.length) || 0} VODs</span>
+                      <span>{(twitchData.counts?.clips ?? twitchData.clips?.length) || 0} Clips</span>
+                      <span>{twitchData.counts?.total ?? ((twitchData.vods?.length || 0) + (twitchData.clips?.length || 0))} Total Items</span>
                       <span>
                         {twitchData.clipWindow?.allTime
                           ? 'All-time clips'

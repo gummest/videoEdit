@@ -258,6 +258,66 @@ export const fetchClipAccessToken = async (clipSlug) => {
   }
 };
 
+export const fetchWithTimeout = async (url, options = {}, timeoutMs = 8_000) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const isRetryableFetchError = (error) => {
+  if (!error) return false;
+  const name = error.name || '';
+  return name === 'AbortError' || name === 'TypeError';
+};
+
+export const probeClipMediaCandidates = async (
+  candidates = [],
+  {
+    timeoutMs = 8_000,
+    retries = 1,
+    maxAttempts = 12,
+  } = {}
+) => {
+  const attempts = candidates.filter(Boolean).slice(0, maxAttempts);
+
+  for (const candidate of attempts) {
+    let attempt = 0;
+    while (attempt <= retries) {
+      try {
+        const response = await fetchWithTimeout(candidate, {}, timeoutMs);
+        if (!response.ok) {
+          break;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        const isVideo =
+          contentType.includes('video/') || contentType.includes('application/octet-stream');
+
+        if (!isVideo) {
+          break;
+        }
+
+        return { response, resolvedUrl: candidate };
+      } catch (error) {
+        if (!isRetryableFetchError(error) || attempt === retries) {
+          break;
+        }
+      }
+      attempt += 1;
+    }
+  }
+
+  return { response: null, resolvedUrl: null };
+};
+
 export const clearCachedToken = () => {
   cachedToken = null;
 };
