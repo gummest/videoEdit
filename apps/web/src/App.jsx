@@ -1,6 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
+
+// Configure axios to send credentials
+axios.defaults.withCredentials = true;
 
 const PRESETS = {
   quick30s: { label: 'Quick 30s (3s cuts)', totalLength: 30, cutDuration: 3 },
@@ -110,8 +113,44 @@ function App() {
   const [clipEnd, setClipEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedTwitch, setSelectedTwitch] = useState(null);
   const [clipImporting, setClipImporting] = useState(null);
+  
+  // Twitch authentication state
+  const [twitchUser, setTwitchUser] = useState(null);
+  const [twitchAuthLoading, setTwitchAuthLoading] = useState(true);
 
   const fileInputRef = useRef(null);
+  
+  // Check Twitch auth on mount
+  useEffect(() => {
+    const checkTwitchAuth = async () => {
+      try {
+        const response = await axios.get('/api/auth/twitch/me', {
+          withCredentials: true,
+        });
+        setTwitchUser(response.data.user);
+      } catch (err) {
+        // Not authenticated, that's okay
+        setTwitchUser(null);
+      } finally {
+        setTwitchAuthLoading(false);
+      }
+    };
+    
+    checkTwitchAuth();
+    
+    // Check for OAuth callback messages
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('twitch_connected') === 'true') {
+      // Reload user info
+      checkTwitchAuth();
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (params.get('error')) {
+      setTwitchError(params.get('error'));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -319,6 +358,49 @@ function App() {
     setResultVideo(null);
     setError(null);
     setUploadProgress(0);
+  };
+
+  const handleTwitchLogin = () => {
+    window.location.href = '/api/auth/twitch/login';
+  };
+  
+  const handleTwitchLogout = async () => {
+    try {
+      await axios.post('/api/auth/twitch/logout', {}, {
+        withCredentials: true,
+      });
+      setTwitchUser(null);
+      setTwitchData(null);
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
+  
+  const handleFetchMyTwitch = async () => {
+    setTwitchLoading(true);
+    setTwitchError(null);
+    setTwitchData(null);
+    setSelectedTwitch(null);
+
+    try {
+      const response = await axios.get('/api/twitch/my-library', {
+        params: {
+          includeAllClips,
+        },
+        withCredentials: true,
+      });
+      setTwitchData(response.data);
+    } catch (err) {
+      console.error('Failed to load your Twitch library:', err);
+      if (err.response?.status === 401) {
+        setTwitchError('Session expired. Please log in again.');
+        setTwitchUser(null);
+      } else {
+        setTwitchError(err.response?.data?.error || 'Failed to load your Twitch library.');
+      }
+    } finally {
+      setTwitchLoading(false);
+    }
   };
 
   const handleFetchTwitch = async () => {
@@ -564,6 +646,57 @@ function App() {
                 <p>Browse VODs and clips, then import a clip for editing.</p>
               </div>
             </div>
+            
+            {!twitchAuthLoading && (
+              <div className="twitch-auth-section">
+                {twitchUser ? (
+                  <div className="twitch-user-card">
+                    <div className="twitch-user-info">
+                      {twitchUser.profileImageUrl && (
+                        <img
+                          src={twitchUser.profileImageUrl}
+                          alt={twitchUser.displayName}
+                          className="twitch-user-avatar"
+                        />
+                      )}
+                      <div>
+                        <h3>{twitchUser.displayName}</h3>
+                        <p>@{twitchUser.login}</p>
+                      </div>
+                    </div>
+                    <div className="twitch-auth-buttons">
+                      <button
+                        className="process-btn"
+                        onClick={handleFetchMyTwitch}
+                        disabled={twitchLoading}
+                      >
+                        {twitchLoading ? 'Loading...' : 'Load My Videos'}
+                      </button>
+                      <button
+                        className="secondary-btn"
+                        onClick={handleTwitchLogout}
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="twitch-login-prompt">
+                    <h3>Connect Your Twitch Account</h3>
+                    <p>Login with Twitch to browse and import your VODs and clips.</p>
+                    <button
+                      className="twitch-login-btn"
+                      onClick={handleTwitchLogin}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z" />
+                      </svg>
+                      Login with Twitch
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="twitch-form">
               <div className="input-group">

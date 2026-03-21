@@ -587,3 +587,106 @@
   color: #6b7280;
   word-break: break-all;
 }
+
+/* Twitch Authentication Styles */
+.twitch-auth-section {
+  margin-bottom: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 2px solid #f3f4f6;
+}
+
+.twitch-login-prompt {
+  text-align: center;
+  padding: 2rem;
+  background: linear-gradient(135deg, #9147ff 0%, #6441a5 100%);
+  border-radius: 1rem;
+  color: white;
+}
+
+.twitch-login-prompt h3 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.twitch-login-prompt p {
+  margin-bottom: 1.5rem;
+  opacity: 0.9;
+}
+
+.twitch-login-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: white;
+  color: #6441a5;
+  padding: 0.875rem 2rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1rem;
+}
+
+.twitch-login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.twitch-user-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  background: #f9fafb;
+  border-radius: 0.75rem;
+  border: 2px solid #e5e7eb;
+}
+
+.twitch-user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.twitch-user-avatar {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  border: 2px solid #9147ff;
+}
+
+.twitch-user-info h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+  color: #111827;
+}
+
+.twitch-user-info p {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.twitch-auth-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.secondary-btn {
+  background: white;
+  color: #6b7280;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  border: 2px solid #e5e7eb;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.secondary-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}

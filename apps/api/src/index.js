@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
+import session from 'express-session';
 import { processVideo } from './videoProcessor.js';
 import { cleanupTempFiles } from './utils.js';
 import {
@@ -10,6 +11,7 @@ import {
   fetchClipById,
   fetchUserByLogin,
 } from './twitchClient.js';
+import authRoutes, { requireTwitchAuth, userTwitchFetch } from './authRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -78,9 +80,27 @@ const maxUploadLabel = formatBytesLabel(maxUploadBytes);
 
 // Middleware
 app.disable('x-powered-by');
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 app.use(express.json({ limit: maxUploadBytes }));
 app.use(express.urlencoded({ extended: true, limit: maxUploadBytes }));
+
+// Session middleware
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'videoedit-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  },
+}));
+
+// Auth routes
+app.use('/api/auth', authRoutes);
 
 // Configure multer for file uploads
 const upload = multer({
@@ -176,7 +196,87 @@ app.post('/api/process', upload.single('video'), async (req, res) => {
   }
 });
 
-// Twitch library endpoints
+// User's Twitch library (requires auth)
+app.get('/api/twitch/my-library', requireTwitchAuth, async (req, res) => {
+  try {
+    const { user } = req.session.twitchAuth;
+    const { includeAllClips } = req.query;
+    
+    const includeAll = includeAllClips !== 'false';
+    const clipStartDate = includeAll
+      ? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const clipEndDate = new Date();
+    
+    // Fetch videos
+    const fetchAllUserVideos = async (userId) => {
+      const items = [];
+      let cursor = null;
+      
+      do {
+        const pageParams = {
+          user_id: userId,
+          type: 'archive',
+          first: 100,
+          ...(cursor ? { after: cursor } : {}),
+        };
+        
+        const data = await userTwitchFetch(req.session, '/videos', pageParams);
+        items.push(...(data.data || []));
+        cursor = data.pagination?.cursor;
+      } while (cursor);
+      
+      return items;
+    };
+    
+    // Fetch clips
+    const fetchAllUserClips = async (userId, startDate, endDate) => {
+      const items = [];
+      let cursor = null;
+      
+      do {
+        const pageParams = {
+          broadcaster_id: userId,
+          started_at: startDate.toISOString(),
+          ended_at: endDate.toISOString(),
+          first: 100,
+          ...(cursor ? { after: cursor } : {}),
+        };
+        
+        const data = await userTwitchFetch(req.session, '/clips', pageParams);
+        items.push(...(data.data || []));
+        cursor = data.pagination?.cursor;
+      } while (cursor);
+      
+      return items;
+    };
+    
+    const [vods, clips] = await Promise.all([
+      fetchAllUserVideos(user.id),
+      includeAll
+        ? fetchAllUserClips(user.id, clipStartDate, clipEndDate)
+        : fetchAllUserClips(user.id, clipStartDate, clipEndDate),
+    ]);
+    
+    return res.json({
+      broadcaster: user,
+      vods,
+      clips,
+      clipWindow: {
+        start: clipStartDate.toISOString(),
+        end: clipEndDate.toISOString(),
+        allTime: includeAll,
+      },
+    });
+  } catch (error) {
+    console.error('Twitch my-library error:', error.message);
+    return res.status(500).json({
+      error: 'Failed to load your Twitch library. Please try logging in again.',
+    });
+  }
+});
+
+// Public Twitch library (no auth, for browsing other channels)
 app.get('/api/twitch/library', async (req, res) => {
   try {
     const { login, broadcasterId, clipStart, clipEnd, includeAllClips } = req.query;
