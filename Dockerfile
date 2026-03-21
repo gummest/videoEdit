@@ -60,61 +60,63 @@ RUN echo "server { \
 }" > /etc/nginx/http.d/default.conf
 
 # Start script: robust supervisor for node + nginx with proper signal handling
-RUN printf "#!/bin/sh
+RUN cat <<'EOF' > /start.sh
+#!/bin/sh
 set -e
 
-node_pid=\"\"
-nginx_pid=\"\"
+node_pid=""
+nginx_pid=""
 
 shutdown() {
-    echo \"[start.sh] Received SIGTERM, shutting down...\"
-    [ -n \"\$nginx_pid\" ] && kill -TERM \$nginx_pid 2>/dev/null
-    [ -n \"\$node_pid\" ] && kill -TERM \$node_pid 2>/dev/null
+    echo "[start.sh] Received SIGTERM, shutting down..."
+    [ -n "$nginx_pid" ] && kill -TERM $nginx_pid 2>/dev/null
+    [ -n "$node_pid" ] && kill -TERM $node_pid 2>/dev/null
     wait
-    echo \"[start.sh] Shutdown complete\"
+    echo "[start.sh] Shutdown complete"
     exit 0
 }
 trap shutdown SIGTERM SIGINT
 
-echo \"[start.sh] Starting Node API on port 3000...\"
+echo "[start.sh] Starting Node API on port 3000..."
 PORT=3000 node /app/apps/api/src/index.js &
-node_pid=\$!
-echo \"[start.sh] Node API started (PID \$node_pid)\"
+node_pid=$!
+echo "[start.sh] Node API started (PID $node_pid)"
 
 # Wait for Node to initialize (up to 15s)
 i=0
-while [ \$i -lt 15 ]; do
+while [ $i -lt 15 ]; do
     if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
-        echo \"[start.sh] Node API health check passed\"
+        echo "[start.sh] Node API health check passed"
         break
     fi
-    i=\$((i+1))
-    echo \"[start.sh] Waiting for Node API... (\$i/15)\"
+    i=$((i+1))
+    echo "[start.sh] Waiting for Node API... ($i/15)"
     sleep 1
 done
 
-echo \"[start.sh] Starting nginx on port 80...\"
-nginx -g \"daemon off;\" &
-nginx_pid=\$!
-echo \"[start.sh] nginx started (PID \$nginx_pid)\"
+echo "[start.sh] Starting nginx on port 80..."
+nginx -g "daemon off;" &
+nginx_pid=$!
+echo "[start.sh] nginx started (PID $nginx_pid)"
 
 # Wait a moment then verify both are still running
 sleep 2
 
-if ! kill -0 \$nginx_pid 2>/dev/null; then
-    echo \"[start.sh] ERROR: nginx failed to start!\"
+if ! kill -0 $nginx_pid 2>/dev/null; then
+    echo "[start.sh] ERROR: nginx failed to start!"
     exit 1
 fi
-if ! kill -0 \$node_pid 2>/dev/null; then
-    echo \"[start.sh] ERROR: Node API crashed during startup!\"
+if ! kill -0 $node_pid 2>/dev/null; then
+    echo "[start.sh] ERROR: Node API crashed during startup!"
     exit 1
 fi
 
-echo \"[start.sh] All services running. Node=\$node_pid (port 3000), nginx=\$nginx_pid (port 80)\"
+echo "[start.sh] All services running. Node=$node_pid (port 3000), nginx=$nginx_pid (port 80)"
 
 # Keep container alive - wait on nginx (and implicitly node since it has no tty stdin)
-wait \$nginx_pid
-" > /start.sh && chmod +x /start.sh
+wait $nginx_pid
+EOF
+RUN chmod +x /start.sh
 
 EXPOSE 80
 
