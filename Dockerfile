@@ -19,8 +19,8 @@ RUN npm run build --prefix apps/web
 # Final stage: nginx serves SPA, Node.js runs API
 FROM node:20-alpine
 
-# Install ffmpeg + nginx
-RUN apk add --no-cache ffmpeg nginx
+# Install ffmpeg + nginx + curl (for health check)
+RUN apk add --no-cache ffmpeg nginx curl
 
 WORKDIR /app
 
