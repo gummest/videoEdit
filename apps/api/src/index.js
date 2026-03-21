@@ -22,6 +22,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Required when running behind HTTPS reverse proxy (Coolify/Nginx/Cloudflare)
+app.set('trust proxy', 1);
 
 const DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 
@@ -92,8 +96,10 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'videoedit-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
+  proxy: isProduction,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
+    sameSite: isProduction ? 'lax' : 'lax',
     httpOnly: true,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   },

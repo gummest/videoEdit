@@ -140,13 +140,20 @@ function App() {
     
     // Check for OAuth callback messages
     const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'twitch') {
+      setActiveTab('twitch');
+    }
+
     if (params.get('twitch_connected') === 'true') {
+      setActiveTab('twitch');
       // Reload user info
       checkTwitchAuth();
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
     }
     if (params.get('error')) {
+      setActiveTab('twitch');
       setTwitchError(params.get('error'));
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -361,7 +368,7 @@ function App() {
   };
 
   const handleTwitchLogin = () => {
-    window.location.href = '/api/auth/twitch/login';
+    window.location.href = '/api/auth/twitch/login?returnTo=twitch';
   };
   
   const handleTwitchLogout = async () => {

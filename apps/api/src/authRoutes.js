@@ -14,39 +14,72 @@ const getRequiredEnv = (key) => {
   return value;
 };
 
+const toSafeTab = (value) => (value === 'twitch' ? 'twitch' : 'local');
+const buildFrontendRedirect = ({ twitchConnected = false, error = null, tab = 'local' }) => {
+  const redirect = new URL('/', 'https://edit.mesutapps.online');
+  if (twitchConnected) redirect.searchParams.set('twitch_connected', 'true');
+  if (error) redirect.searchParams.set('error', error);
+  redirect.searchParams.set('tab', toSafeTab(tab));
+  return `${redirect.pathname}${redirect.search}`;
+};
+
 // OAuth login redirect
-router.get('/twitch/login', (req, res) => {
+router.get('/twitch/login', async (req, res) => {
   const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
   const redirectUri = getRequiredEnv('TWITCH_REDIRECT_URI');
-  
+  const returnTab = toSafeTab(req.query.returnTo);
+  const state = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
   const scopes = [
     'user:read:email',
     'clips:edit',
   ];
-  
+
+  req.session.twitchOAuth = {
+    state,
+    returnTab,
+  };
+  await req.session.save();
+
   const authUrl = new URL(TWITCH_AUTH_URL);
   authUrl.searchParams.set('client_id', clientId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('scope', scopes.join(' '));
   authUrl.searchParams.set('force_verify', 'true');
-  
+  authUrl.searchParams.set('state', state);
+
   res.redirect(authUrl.toString());
 });
 
 // OAuth callback
 router.get('/twitch/callback', async (req, res) => {
-  const { code, error, error_description } = req.query;
-  
+  const { code, error, error_description, state } = req.query;
+  const savedOAuth = req.session.twitchOAuth;
+  const returnTab = toSafeTab(savedOAuth?.returnTab || 'twitch');
+
   if (error) {
     console.error('Twitch OAuth error:', error, error_description);
-    return res.redirect(`/?error=${encodeURIComponent(error_description || error)}`);
+    return res.redirect(buildFrontendRedirect({
+      error: error_description || error,
+      tab: returnTab,
+    }));
   }
-  
+
   if (!code) {
-    return res.redirect('/?error=No authorization code received');
+    return res.redirect(buildFrontendRedirect({
+      error: 'No authorization code received',
+      tab: returnTab,
+    }));
   }
-  
+
+  if (!savedOAuth || !state || state !== savedOAuth.state) {
+    return res.redirect(buildFrontendRedirect({
+      error: 'OAuth state mismatch. Please try logging in again.',
+      tab: 'twitch',
+    }));
+  }
+
   try {
     const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
     const clientSecret = getRequiredEnv('TWITCH_CLIENT_SECRET');
@@ -105,13 +138,20 @@ router.get('/twitch/callback', async (req, res) => {
       },
     };
     
+    delete req.session.twitchOAuth;
     await req.session.save();
-    
-    // Redirect to frontend
-    res.redirect('/?twitch_connected=true');
+
+    // Redirect to frontend and keep user on Twitch tab
+    res.redirect(buildFrontendRedirect({
+      twitchConnected: true,
+      tab: returnTab,
+    }));
   } catch (err) {
     console.error('OAuth callback error:', err);
-    res.redirect(`/?error=${encodeURIComponent(err.message)}`);
+    res.redirect(buildFrontendRedirect({
+      error: err.message,
+      tab: returnTab,
+    }));
   }
 });
 
