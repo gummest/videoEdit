@@ -36,8 +36,9 @@ COPY --from=builder /app/apps/web/dist ./apps/web/dist/
 RUN mkdir -p /app/apps/api/uploads
 
 # Nginx config: serve SPA from /app/apps/web/dist, proxy /api/* to Node backend on 3000
+# Listen on 8080 (nginx) while Node runs on 3000 - Coolify maps 80->8080
 RUN echo 'server { \
-    listen 80; \
+    listen 8080; \
     server_name _; \
     root /app/apps/web/dist; \
     index index.html; \
@@ -59,8 +60,8 @@ RUN echo 'server { \
 }' > /etc/nginx/http.d/default.conf
 
 # Start script: robust supervisor for node + nginx with proper signal handling
-RUN printf '#!/bin/sh\nset -e\n\nnode_pid=\"\"\nnginx_pid=\"\"\n\nshutdown() {\n    echo "[start.sh] Received SIGTERM, shutting down..."\n    [ -n "$nginx_pid" ] && kill -TERM $nginx_pid 2>/dev/null\n    [ -n "$node_pid" ] && kill -TERM $node_pid 2>/dev/null\n    wait\n    echo "[start.sh] Shutdown complete"\n    exit 0\n}\ntrap shutdown SIGTERM SIGINT\n\necho "[start.sh] Starting Node API..."\nnode /app/apps/api/src/index.js &\nnode_pid=$!\necho "[start.sh] Node API started (PID $node_pid)"\n\n# Wait for Node to initialize (up to 15s)\ni=0\nwhile [ $i -lt 15 ]; do\n    if curl -sf http://localhost:3000/health > /dev/null 2>&1; then\n        echo "[start.sh] Node API health check passed"\n        break\n    fi\n    i=$((i+1))\n    echo "[start.sh] Waiting for Node API... ($i/15)"\n    sleep 1\ndone\n\necho "[start.sh] Starting nginx..."\nnginx -g "daemon off;" &\nnginx_pid=$!\necho "[start.sh] nginx started (PID $nginx_pid)"\n\n# Wait a moment then verify both are still running\nsleep 2\n\nif ! kill -0 $nginx_pid 2>/dev/null; then\n    echo "[start.sh] ERROR: nginx failed to start!"\n    exit 1\nfi\nif ! kill -0 $node_pid 2>/dev/null; then\n    echo "[start.sh] ERROR: Node API crashed during startup!"\n    exit 1\nfi\n\necho "[start.sh] All services running. Node=$node_pid, nginx=$nginx_pid"\n\n# Keep container alive - wait on nginx (and implicitly node since it has no tty stdin)\nwait $nginx_pid\n' > /start.sh && chmod +x /start.sh
+RUN printf '#!/bin/sh\nset -e\n\nnode_pid=\"\"\nnginx_pid=\"\"\n\nshutdown() {\n    echo "[start.sh] Received SIGTERM, shutting down..."\n    [ -n "$nginx_pid" ] && kill -TERM $nginx_pid 2>/dev/null\n    [ -n "$node_pid" ] && kill -TERM $node_pid 2>/dev/null\n    wait\n    echo "[start.sh] Shutdown complete"\n    exit 0\n}\ntrap shutdown SIGTERM SIGINT\n\necho "[start.sh] Starting Node API on port 3000..."\nPORT=3000 node /app/apps/api/src/index.js &\nnode_pid=$!\necho "[start.sh] Node API started (PID $node_pid)"\n\n# Wait for Node to initialize (up to 15s)\ni=0\nwhile [ $i -lt 15 ]; do\n    if curl -sf http://localhost:3000/health > /dev/null 2>&1; then\n        echo "[start.sh] Node API health check passed"\n        break\n    fi\n    i=$((i+1))\n    echo "[start.sh] Waiting for Node API... ($i/15)"\n    sleep 1\ndone\n\necho "[start.sh] Starting nginx on 8080..."\nnginx -g "daemon off;" &\nnginx_pid=$!\necho "[start.sh] nginx started (PID $nginx_pid)"\n\n# Wait a moment then verify both are still running\nsleep 2\n\nif ! kill -0 $nginx_pid 2>/dev/null; then\n    echo "[start.sh] ERROR: nginx failed to start!"\n    exit 1\nfi\nif ! kill -0 $node_pid 2>/dev/null; then\n    echo "[start.sh] ERROR: Node API crashed during startup!"\n    exit 1\nfi\n\necho "[start.sh] All services running. Node=$node_pid (port 3000), nginx=$nginx_pid (port 8080)"\n\n# Keep container alive - wait on nginx (and implicitly node since it has no tty stdin)\nwait $nginx_pid\n' > /start.sh && chmod +x /start.sh
 
-EXPOSE 80
+EXPOSE 80 8080
 
 ENTRYPOINT ["/start.sh"]
