@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import session from 'express-session';
+import cookieParser from 'cookie-parser';
 import { processVideo } from './videoProcessor.js';
 import { cleanupTempFiles } from './utils.js';
 import {
@@ -18,6 +19,8 @@ import {
   extractClipUriCandidatesFromAccessTokenValue,
 } from './twitchClient.js';
 import authRoutes, { requireTwitchAuth } from './authRoutes.js';
+import userAuthRoutes from './userAuthRoutes.js';
+import appRoutes from './appRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -103,6 +106,7 @@ app.use(cors({
   origin: true,
   credentials: true,
 }));
+app.use(cookieParser());
 app.use(express.json({ limit: maxUploadBytes }));
 app.use(express.urlencoded({ extended: true, limit: maxUploadBytes }));
 
@@ -122,6 +126,8 @@ app.use(session({
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+app.use('/api/account', userAuthRoutes);
+app.use('/api/app', appRoutes);
 
 // Configure multer for file uploads
 const upload = multer({
