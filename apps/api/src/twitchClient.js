@@ -188,7 +188,7 @@ export const fetchClipPlaybackSources = async (clipSlug) => {
   const clientId = getRequiredEnv('TWITCH_CLIENT_ID');
 
   try {
-    const response = await fetch('https://gql.twitch.tv/gql', {
+    const response = await fetchWithTimeout('https://gql.twitch.tv/gql', {
       method: 'POST',
       headers: {
         'Client-ID': clientId,
@@ -319,5 +319,16 @@ export const probeClipMediaCandidates = async (
 };
 
 export const clearCachedToken = () => {
+  cachedToken = null;
+};
+oken = () => {
+  cachedToken = null;
+};
+hedToken = null;
+};
+ () => {
+  cachedToken = null;
+};
+ clearCachedToken = () => {
   cachedToken = null;
 };

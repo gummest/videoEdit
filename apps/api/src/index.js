@@ -323,6 +323,7 @@ app.get('/api/twitch/library', async (req, res) => {
 
 app.get('/api/twitch/clip-download', async (req, res) => {
   const requestId = req.requestId;
+  const startedAt = Date.now();
 
   try {
     const { clipId } = req.query;
@@ -330,11 +331,20 @@ app.get('/api/twitch/clip-download', async (req, res) => {
       return res.status(400).json({ error: 'Missing clipId.', requestId });
     }
 
+    const mark = (stage) => {
+      const elapsedMs = Date.now() - startedAt;
+      console.log(`[clip-download][${requestId}] ${stage} (${elapsedMs}ms)`, { clipId });
+    };
+
+    mark('start');
     const clip = await fetchClipById(clipId);
+    mark('clip-metadata-ready');
+
     const candidateUrls = deriveClipMp4Candidates(clip, clipId);
 
     const playback = await fetchClipPlaybackSources(clipId);
     const playbackCandidates = playback.sources || [];
+    mark('playback-sources-ready');
 
     let signedCandidates = [];
     const accessToken = await fetchClipAccessToken(clipId);
@@ -344,6 +354,7 @@ app.get('/api/twitch/clip-download', async (req, res) => {
         return `${url}${separator}sig=${encodeURIComponent(accessToken.sig)}&token=${encodeURIComponent(accessToken.token)}`;
       });
     }
+    mark('access-token-ready');
 
     const attempts = [...signedCandidates, ...playbackCandidates, ...candidateUrls];
 
@@ -359,10 +370,11 @@ app.get('/api/twitch/clip-download', async (req, res) => {
       retries: Number(process.env.TWITCH_CLIP_FETCH_RETRIES || 0),
       maxAttempts: Number(process.env.TWITCH_CLIP_MAX_ATTEMPTS || 6),
     });
+    mark('media-probe-finished');
 
     if (!clipResponse) {
-      return res.status(504).json({
-        error: 'Failed to fetch Twitch clip media from all known URL patterns.',
+      return res.status(424).json({
+        error: 'Clip media is currently unavailable from Twitch candidate URLs. Please retry shortly.',
         requestId,
       });
     }
@@ -385,7 +397,7 @@ app.get('/api/twitch/clip-download', async (req, res) => {
     });
     stream.pipe(res);
   } catch (error) {
-    console.error('Twitch clip download error:', error.message, { requestId });
+    console.error('Twitch clip download error:', error.message, { requestId, elapsedMs: Date.now() - startedAt });
     return res.status(500).json({
       error: `Failed to import Twitch clip: ${error.message}`,
       requestId,
