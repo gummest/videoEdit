@@ -28,6 +28,7 @@ COPY packages/shared ./packages/shared
 RUN npm run build -w apps/api && npm prune --omit=dev -w apps/api
 
 RUN mkdir -p /app/apps/api/uploads
+RUN chmod +x /app/apps/api/start.sh
 
 EXPOSE 3000
-CMD ["node", "/app/apps/api/dist/index.js"]
+CMD ["/app/apps/api/start.sh"]

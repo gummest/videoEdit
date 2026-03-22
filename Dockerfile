@@ -14,8 +14,10 @@ RUN npm ci --omit=dev
 # Copy prebuilt API output + runtime files
 COPY apps/api/dist ./apps/api/dist
 COPY apps/api/prisma ./apps/api/prisma
+COPY apps/api/start.sh ./apps/api/start.sh
 COPY packages/shared ./packages/shared
 
 RUN mkdir -p /app/apps/api/uploads
+RUN chmod +x /app/apps/api/start.sh
 EXPOSE 3000
-CMD ["node", "/app/apps/api/dist/index.js"]
+CMD ["/app/apps/api/start.sh"]
