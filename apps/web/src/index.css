@@ -145,6 +145,38 @@ a {
   color: var(--text-sec);
 }
 
+.ve-stats {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.ve-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 24px;
+}
+
+.ve-stat-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+}
+
+.ve-stat-item strong {
+  font-size: 26px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.ve-stat-item span {
+  color: var(--text-sec);
+  font-size: 13px;
+}
+
 .ve-features {
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -216,6 +248,57 @@ a {
   line-height: 1.6;
 }
 
+.ve-ecosystem {
+  padding: 88px 0;
+}
+
+.ve-ecosystem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.ve-ecosystem-card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.ve-ecosystem-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.ve-chip {
+  display: inline-block;
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+
+.ve-ecosystem-card h3 {
+  margin: 0 0 8px;
+}
+
+.ve-ecosystem-card p {
+  color: var(--text-sec);
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ve-link {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .ve-cta {
   padding: 96px 0;
   text-align: center;
@@ -242,5 +325,10 @@ a {
 @media (max-width: 768px) {
   .ve-hero {
     padding-top: 86px;
+  }
+
+  .ve-stats-grid {
+    grid-template-columns: 1fr;
+    padding: 18px;
   }
 }
