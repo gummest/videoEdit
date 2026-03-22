@@ -1,29 +1,20 @@
-FROM node:20-alpine AS builder
-RUN apk add --no-cache ffmpeg
-WORKDIR /app
-
-# Workspace manifests
-COPY package*.json ./
-COPY tsconfig.base.json ./
-COPY apps/api/package*.json ./apps/api/
-COPY packages/shared/package*.json ./packages/shared/
-
-# Install deps and copy sources
-RUN npm ci --include=dev
-COPY apps/api ./apps/api
-COPY packages/shared ./packages/shared
-
-# Build API in workspace context and trim dev deps
-RUN npm run build -w apps/api && npm prune --omit=dev
-
-FROM node:20-alpine AS runtime
+FROM node:20-alpine
 RUN apk add --no-cache ffmpeg
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/api ./apps/api
-COPY --from=builder /app/packages/shared ./packages/shared
+# Workspace manifests for dependency install
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/shared/package*.json ./packages/shared/
+
+# Install runtime deps only
+RUN npm ci --omit=dev
+
+# Copy prebuilt API output + runtime files
+COPY apps/api/dist ./apps/api/dist
+COPY apps/api/prisma ./apps/api/prisma
+COPY packages/shared ./packages/shared
 
 RUN mkdir -p /app/apps/api/uploads
 EXPOSE 3000
