@@ -20,7 +20,6 @@ export function LandingPage() {
   return (
     <main>
       <section className="landing-hero page-wrap">
-        <span className="badge">MesutApps • videoEdit</span>
         <h1 className="section-title">AI destekli video edit,
 tek panelde üretim hattı</h1>
         <p className="section-sub" style={{ maxWidth: 740, margin: '0 auto' }}>
