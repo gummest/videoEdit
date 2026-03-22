@@ -1,27 +1,33 @@
-# Dockerfile for video processing API
-# Includes FFmpeg for video processing
+# Workspace-aware Dockerfile for video processing API
+# Build context: repo root (docker build -f apps/api/Dockerfile .)
 
-FROM node:18-alpine
-
-# Install FFmpeg
+FROM node:20-alpine AS deps
 RUN apk add --no-cache ffmpeg
-
 WORKDIR /app
 
-# Copy package files
+# Copy workspace manifests first for better layer cache
 COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/shared/package*.json ./packages/shared/
 
-# Install dependencies
-RUN npm ci --only=production
+# Install workspace deps so @clipforge/shared resolves correctly
+RUN npm ci --include=dev
 
-# Copy source code
-COPY src/ ./src/
+FROM node:20-alpine AS runtime
+RUN apk add --no-cache ffmpeg
+WORKDIR /app
 
-# Create uploads directory
-RUN mkdir -p uploads
+ENV NODE_ENV=production
 
-# Expose port
+# Runtime deps + required workspace package
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/api ./apps/api
+COPY packages/shared ./packages/shared
+
+# Build API and keep runtime small
+RUN npm run build -w apps/api && npm prune --omit=dev -w apps/api
+
+RUN mkdir -p /app/apps/api/uploads
+
 EXPOSE 3000
-
-# Start the server
-CMD ["npm", "start"]
+CMD ["node", "/app/apps/api/dist/index.js"]
