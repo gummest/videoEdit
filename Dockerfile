@@ -9,12 +9,11 @@ WORKDIR /app
 # Copy entire repo
 COPY . .
 
-# Install API dependencies
-RUN npm ci --prefix apps/api
+# Install workspace dependencies from repo root (required for @clipforge/* packages)
+RUN npm ci --include=dev
 
-# Install web dependencies and build
-RUN npm ci --prefix apps/web
-RUN npm run build --prefix apps/web
+# Build web app workspace
+RUN npm run build -w apps/web
 
 # Final stage: nginx serves SPA, Node.js runs API
 FROM node:20-alpine
@@ -24,10 +23,13 @@ RUN apk add --no-cache ffmpeg nginx curl
 
 WORKDIR /app
 
-# Copy API from builder
+# Copy API sources
 COPY --from=builder /app/apps/api/src ./apps/api/src/
 COPY --from=builder /app/apps/api/package*.json ./apps/api/
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules/
+
+# Copy workspace runtime deps + internal workspace packages (symlink targets)
+COPY --from=builder /app/node_modules ./node_modules/
+COPY --from=builder /app/packages ./packages/
 
 # Copy built web app
 COPY --from=builder /app/apps/web/dist ./apps/web/dist/
