@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { LandingPage } from './pages/LandingPage';
@@ -12,6 +13,10 @@ import { LibraryPage } from './pages/app/LibraryPage';
 import { ExportsPage } from './pages/app/ExportsPage';
 
 export function App() {
+  useEffect(() => {
+    document.title = 'videoEdit';
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />

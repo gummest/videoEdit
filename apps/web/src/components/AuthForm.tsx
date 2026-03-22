@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { authRequest } from '../lib/api';
+import { authRequest, getTwitchLoginUrl } from '../lib/api';
 
 interface Props { mode: 'login' | 'register'; }
 
@@ -71,6 +71,10 @@ export function AuthForm({ mode }: Props) {
           <button className="btn btn-primary" disabled={loading} type="submit">
             {loading ? 'Gönderiliyor...' : mode === 'login' ? 'Giriş Yap' : 'Kaydı Tamamla'}
           </button>
+
+          <a className="btn btn-secondary" href={getTwitchLoginUrl()}>
+            {mode === 'login' ? 'Twitch ile Giriş Yap' : 'Twitch ile Kayıt Ol'}
+          </a>
         </form>
 
         <p className="section-sub" style={{ fontSize: 14, marginBottom: 0 }}>
