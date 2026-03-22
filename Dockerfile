@@ -1,155 +1,33 @@
-# Multi-stage Dockerfile: Node.js API + Nginx SPA server
-FROM node:20-alpine AS builder
+# Workspace-aware Dockerfile for video processing API
+# Build context: repo root (docker build -f apps/api/Dockerfile .)
 
-# Install ffmpeg for video processing
-RUN apk add --no-cache ffmpeg git
-
+FROM node:20-alpine AS deps
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 
-# Copy entire repo
-COPY . .
+# Copy workspace manifests first for better layer cache
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/shared/package*.json ./packages/shared/
 
-# Install workspace dependencies from repo root (required for @clipforge/* packages)
+# Install workspace deps so @clipforge/shared resolves correctly
 RUN npm ci --include=dev
 
-# Build web app workspace
-RUN npm run build -w apps/web
-
-# Final stage: nginx serves SPA, Node.js runs API
-FROM node:20-alpine
-
-# Install ffmpeg + nginx + curl (for health check in start.sh)
-RUN apk add --no-cache ffmpeg nginx curl
-
+FROM node:20-alpine AS runtime
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 
-# Copy API sources
-COPY --from=builder /app/apps/api/src ./apps/api/src/
-COPY --from=builder /app/apps/api/package*.json ./apps/api/
+ENV NODE_ENV=production
 
-# Copy workspace runtime deps + internal workspace packages (symlink targets)
-COPY --from=builder /app/node_modules ./node_modules/
-COPY --from=builder /app/packages ./packages/
+# Runtime deps + required workspace package
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/api ./apps/api
+COPY packages/shared ./packages/shared
 
-# Copy built web app
-COPY --from=builder /app/apps/web/dist ./apps/web/dist/
+# Build API and keep runtime small
+RUN npm run build -w apps/api && npm prune --omit=dev -w apps/api
 
-# Create uploads dir
 RUN mkdir -p /app/apps/api/uploads
 
-# Nginx config: serve SPA from /app/apps/web/dist, proxy /api/* to Node backend on 3000
-# nginx runs on port 80, Node on 3000 - Coolify maps host:80 -> container:80
-RUN echo "server { \
-    listen 80; \
-    server_name _; \
-    root /app/apps/web/dist; \
-    index index.html; \
-    client_max_body_size 2g; \
-    gzip on; \
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript; \
-    location = /api/process { \
-        proxy_pass http://localhost:3000; \
-        proxy_set_header Host \$host; \
-        proxy_set_header X-Real-IP \$remote_addr; \
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; \
-        proxy_set_header X-Forwarded-Proto \$scheme; \
-        proxy_connect_timeout 10s; \
-        proxy_send_timeout 7200s; \
-        proxy_read_timeout 7200s; \
-        proxy_request_buffering off; \
-        proxy_buffering off; \
-    } \
-    location = /api/twitch/clip-download { \
-        proxy_pass http://localhost:3000; \
-        proxy_set_header Host \$host; \
-        proxy_set_header X-Real-IP \$remote_addr; \
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; \
-        proxy_set_header X-Forwarded-Proto \$scheme; \
-        proxy_connect_timeout 10s; \
-        proxy_send_timeout 120s; \
-        proxy_read_timeout 120s; \
-        proxy_buffering off; \
-        proxy_request_buffering off; \
-    } \
-    location /api/ { \
-        proxy_pass http://localhost:3000; \
-        proxy_set_header Host \$host; \
-        proxy_set_header X-Real-IP \$remote_addr; \
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; \
-        proxy_set_header X-Forwarded-Proto \$scheme; \
-        proxy_connect_timeout 10s; \
-        proxy_send_timeout 7200s; \
-        proxy_read_timeout 7200s; \
-        proxy_request_buffering off; \
-        proxy_buffering off; \
-    } \
-    location /health { \
-        proxy_pass http://localhost:3000/health; \
-    } \
-    location / { \
-        try_files \$uri \$uri/ /index.html; \
-    } \
-}" > /etc/nginx/http.d/default.conf
-
-# Start script: robust supervisor for node + nginx with proper signal handling
-RUN cat <<'EOF' > /start.sh
-#!/bin/sh
-set -e
-
-node_pid=""
-nginx_pid=""
-
-shutdown() {
-    echo "[start.sh] Received SIGTERM, shutting down..."
-    [ -n "$nginx_pid" ] && kill -TERM $nginx_pid 2>/dev/null
-    [ -n "$node_pid" ] && kill -TERM $node_pid 2>/dev/null
-    wait
-    echo "[start.sh] Shutdown complete"
-    exit 0
-}
-trap shutdown SIGTERM SIGINT
-
-echo "[start.sh] Starting Node API on port 3000..."
-PORT=3000 node /app/apps/api/src/index.js &
-node_pid=$!
-echo "[start.sh] Node API started (PID $node_pid)"
-
-# Wait for Node to initialize (up to 15s)
-i=0
-while [ $i -lt 15 ]; do
-    if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
-        echo "[start.sh] Node API health check passed"
-        break
-    fi
-    i=$((i+1))
-    echo "[start.sh] Waiting for Node API... ($i/15)"
-    sleep 1
-done
-
-echo "[start.sh] Starting nginx on port 80..."
-nginx -g "daemon off;" &
-nginx_pid=$!
-echo "[start.sh] nginx started (PID $nginx_pid)"
-
-# Wait a moment then verify both are still running
-sleep 2
-
-if ! kill -0 $nginx_pid 2>/dev/null; then
-    echo "[start.sh] ERROR: nginx failed to start!"
-    exit 1
-fi
-if ! kill -0 $node_pid 2>/dev/null; then
-    echo "[start.sh] ERROR: Node API crashed during startup!"
-    exit 1
-fi
-
-echo "[start.sh] All services running. Node=$node_pid (port 3000), nginx=$nginx_pid (port 80)"
-
-# Keep container alive - wait on nginx (and implicitly node since it has no tty stdin)
-wait $nginx_pid
-EOF
-RUN chmod +x /start.sh
-
-EXPOSE 80
-
-ENTRYPOINT ["/start.sh"]
+EXPOSE 3000
+CMD ["node", "/app/apps/api/dist/index.js"]
