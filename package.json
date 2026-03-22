@@ -1,10 +1,18 @@
 {
-  "name": "videoedit",
+  "name": "clipforge",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "build": "npm install --prefix apps/api && npm install --prefix apps/web && npm run build --prefix apps/web",
-    "start": "npm --prefix apps/api start"
+    "dev": "npm run dev -w apps/api & npm run dev -w apps/web",
+    "build": "npm run build -ws",
+    "typecheck": "npm run typecheck -ws",
+    "test": "npm run test -ws",
+    "prisma:generate": "npm run prisma:generate -w apps/api",
+    "prisma:migrate": "npm run prisma:migrate -w apps/api"
   },
   "engines": {
     "node": ">=20.0.0"
