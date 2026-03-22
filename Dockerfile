@@ -1,33 +1,29 @@
-# Workspace-aware Dockerfile for video processing API
-# Build context: repo root (docker build -f apps/api/Dockerfile .)
-
-FROM node:20-alpine AS deps
+FROM node:20-alpine AS builder
 RUN apk add --no-cache ffmpeg
 WORKDIR /app
 
-# Copy workspace manifests first for better layer cache
+# Workspace manifests
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
 COPY packages/shared/package*.json ./packages/shared/
 
-# Install workspace deps so @clipforge/shared resolves correctly
+# Install deps and copy sources
 RUN npm ci --include=dev
+COPY apps/api ./apps/api
+COPY packages/shared ./packages/shared
+
+# Build API in workspace context and trim dev deps
+RUN npm run build -w apps/api && npm prune --omit=dev
 
 FROM node:20-alpine AS runtime
 RUN apk add --no-cache ffmpeg
 WORKDIR /app
-
 ENV NODE_ENV=production
 
-# Runtime deps + required workspace package
-COPY --from=deps /app/node_modules ./node_modules
-COPY apps/api ./apps/api
-COPY packages/shared ./packages/shared
-
-# Build API and keep runtime small
-RUN npm run build -w apps/api && npm prune --omit=dev -w apps/api
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api ./apps/api
+COPY --from=builder /app/packages/shared ./packages/shared
 
 RUN mkdir -p /app/apps/api/uploads
-
 EXPOSE 3000
 CMD ["node", "/app/apps/api/dist/index.js"]
