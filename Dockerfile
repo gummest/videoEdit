@@ -11,7 +11,7 @@ COPY packages/shared/package*.json ./packages/shared/
 COPY packages/ui/package*.json ./packages/ui/
 
 # Install ALL dependencies (including dev for build)
-RUN npm ci
+RUN npm ci --include=dev
 
 # Copy source files
 COPY . .
