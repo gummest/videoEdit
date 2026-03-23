@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? 'https://edit.mesutapps.online' : 'http://localhost:4000');
 
 export function getTwitchLoginUrl() {
   return `${API_URL}/api/auth/twitch/login`;
