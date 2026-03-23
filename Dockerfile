@@ -3,21 +3,28 @@ RUN apk add --no-cache ffmpeg
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Workspace manifests for dependency install
+# Copy workspace manifests for dependency install
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
 COPY packages/shared/package*.json ./packages/shared/
+COPY packages/ui/package*.json ./packages/ui/
 
-# Install runtime deps only
-RUN npm ci --omit=dev
+# Install ALL dependencies (including dev for build)
+RUN npm ci
 
-# Copy prebuilt API output + runtime files
-COPY apps/api/dist ./apps/api/dist
-COPY apps/api/prisma ./apps/api/prisma
-COPY apps/api/start.sh ./apps/api/start.sh
-COPY packages/shared ./packages/shared
+# Copy source files
+COPY . .
 
+# Build the project inside Docker
+RUN npm run build
+
+# Prisma generate (schema is at repo root prisma/schema.prisma)
+RUN npx prisma generate --schema=prisma/schema.prisma
+
+# Create uploads directory
 RUN mkdir -p /app/apps/api/uploads
-RUN chmod +x /app/apps/api/start.sh
+
+# Start API server
 EXPOSE 3000
-CMD ["/app/apps/api/start.sh"]
+CMD ["node", "apps/api/dist/index.js"]
